@@ -1,0 +1,119 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "CodeQL",
+          "organization": "GitHub",
+          "semanticVersion": "2.15.4",
+          "rules": [
+            {
+              "id": "java/sql-injection",
+              "name": "java/sql-injection",
+              "shortDescription": { "text": "Query built from user-controlled sources" },
+              "fullDescription": { "text": "Building a SQL query from user-controlled sources is vulnerable to insertion of malicious SQL code." },
+              "defaultConfiguration": { "level": "error" },
+              "properties": {
+                "tags": [ "security", "external/cwe/cwe-089" ],
+                "precision": "high",
+                "security-severity": "9.8",
+                "problem.severity": "error"
+              }
+            },
+            {
+              "id": "java/weak-cryptographic-algorithm",
+              "name": "java/weak-cryptographic-algorithm",
+              "shortDescription": { "text": "Use of a broken or risky cryptographic algorithm" },
+              "defaultConfiguration": { "level": "warning" },
+              "properties": {
+                "tags": [ "security", "external/cwe/cwe-327" ],
+                "security-severity": "7.5"
+              }
+            },
+            {
+              "id": "java/unused-container",
+              "shortDescription": { "text": "Unused container" },
+              "defaultConfiguration": { "level": "note" },
+              "properties": { "tags": [ "maintainability" ] }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "java/sql-injection",
+          "rule": { "id": "java/sql-injection", "index": 0 },
+          "message": { "text": "This query depends on a [user-provided value](1)." },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "settlement/src/main/java/com/example/LedgerDao.java", "uriBaseId": "%SRCROOT%", "index": 3 },
+                "region": { "startLine": 214, "startColumn": 24, "endColumn": 71 }
+              },
+              "logicalLocations": [
+                { "name": "findByReference", "fullyQualifiedName": "com.example.LedgerDao.findByReference", "kind": "method" }
+              ]
+            }
+          ],
+          "partialFingerprints": { "primaryLocationLineHash": "b47fd1e2c9a0:1", "primaryLocationStartColumnFingerprint": "17" },
+          "relatedLocations": [
+            {
+              "id": 1,
+              "physicalLocation": {
+                "artifactLocation": { "uri": "settlement/src/main/java/com/example/LedgerResource.java" },
+                "region": { "startLine": 88 }
+              },
+              "message": { "text": "user-provided value" }
+            }
+          ],
+          "codeFlows": [
+            {
+              "threadFlows": [
+                {
+                  "locations": [
+                    { "location": { "physicalLocation": { "artifactLocation": { "uri": "settlement/src/main/java/com/example/LedgerResource.java" }, "region": { "startLine": 88 } } } },
+                    { "location": { "physicalLocation": { "artifactLocation": { "uri": "settlement/src/main/java/com/example/LedgerDao.java" }, "region": { "startLine": 214 } } } }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ruleIndex": 1,
+          "message": {
+            "text": "Cryptographic algorithm {0} is weak and should not be used.",
+            "arguments": [ "DES" ]
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "settlement/src/main/java/com/example/TokenCipher.java" },
+                "region": { "startLine": 31 }
+              },
+              "logicalLocations": [
+                { "fullyQualifiedName": "com.example.TokenCipher.encrypt" }
+              ]
+            }
+          ]
+        },
+        {
+          "ruleId": "java/unused-container",
+          "message": { "text": "This container is never used." },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "settlement/src/main/java/com/example/TokenCipher.java" },
+                "region": { "startLine": 12 }
+              }
+            }
+          ]
+        }
+      ],
+      "columnKind": "utf16CodeUnits",
+      "properties": { "semmle.formatSpecifier": "sarifv2.1.0" }
+    }
+  ]
+}

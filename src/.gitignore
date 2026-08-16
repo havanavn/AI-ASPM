@@ -1,0 +1,4 @@
+# Gradle build outputs. Lockfiles (gradle.lockfile) are NOT ignored: ADR-050 requires
+# deterministic dependency resolution, which means the lock is committed.
+build/
+.gradle/

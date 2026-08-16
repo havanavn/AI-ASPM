@@ -1,0 +1,27 @@
+# Version catalogue. ADR-050 requires deterministic dependency resolution: every
+# coordinate is pinned here, no dynamic or snapshot selectors, and `dependencyLocking`
+# in the root build writes a lockfile per configuration.
+[versions]
+errorprone = "2.50.0"
+errorprone-plugin = "4.3.0"
+archunit = "1.4.1"
+junit = "5.11.4"
+postgresql = "42.7.5"
+embeddedpg = "2.1.0"
+embeddedpgbinaries = "17.5.0"
+autoservice = "1.1.1"
+icu4j = "77.1"
+bouncycastle = "1.81"
+
+[libraries]
+errorprone-core = { module = "com.google.errorprone:error_prone_core", version.ref = "errorprone" }
+errorprone-check-api = { module = "com.google.errorprone:error_prone_check_api", version.ref = "errorprone" }
+errorprone-annotation = { module = "com.google.errorprone:error_prone_annotation", version.ref = "errorprone" }
+archunit-junit5 = { module = "com.tngtech.archunit:archunit-junit5", version.ref = "archunit" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher", version = "1.11.4" }
+postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
+embedded-postgres = { module = "io.zonky.test:embedded-postgres", version.ref = "embeddedpg" }
+icu4j = { module = "com.ibm.icu:icu4j", version.ref = "icu4j" }
+bouncycastle = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
+embedded-postgres-binaries = { module = "io.zonky.test.postgres:embedded-postgres-binaries-linux-amd64", version.ref = "embeddedpgbinaries" }

@@ -1,0 +1,72 @@
+-- =============================================================================
+-- V017 — the DELETE grant the role editor needs, and the two omissions V015 left unexplained.
+--
+-- WHY THIS EXISTS. V016 added a role editor that offers deletion for a role that was never assigned.
+-- app_runtime had SELECT, INSERT and UPDATE on `role` and no DELETE, so the button was wired to a
+-- statement the engine refuses: "permission denied for table role".
+--
+-- It was not caught by any test. The role editor's tests run against the domain layer and the
+-- dispatcher; nothing in the suite executes deleteRole against a real engine, so the missing grant was
+-- invisible until the privilege table was read directly on the deployed database. That is the same
+-- shape as the class B form posts answering 400 — a path verified through the client that finds it
+-- easy, and never through the one that actually uses it.
+-- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- 1. DELETE on role and role_permission for the application role.
+--
+-- Deliberately NOT on role_assignment. A role that was ever assigned must be RETIRED, never deleted:
+-- a revoked grant is the record of a decision and product principle 5 makes that record inviolable.
+-- The two controls that hold it are already in place and neither is this grant —
+--
+--   * role_assignment_role_id_fkey is ON DELETE RESTRICT, so the engine refuses the delete while any
+--     assignment references the role, including a revoked one; and
+--   * AccountService.deleteRole carries `AND NOT EXISTS (SELECT 1 FROM role_assignment ...)` inside
+--     the statement rather than as a preceding check, so a grant created concurrently cannot be
+--     orphaned.
+--
+-- Withholding DELETE on role_assignment is what makes "retire, never delete" structural rather than
+-- procedural: no code path in the application tier can remove the history, however it is written.
+-- -----------------------------------------------------------------------------
+GRANT DELETE ON role TO app_runtime;
+
+-- role_permission already carries DELETE (V015) because replacing a role's permission set is a delete
+-- followed by an insert. Restated here as a no-op so a reader of this migration sees the complete set
+-- the editor depends on rather than having to reconstruct it from two files.
+GRANT DELETE ON role_permission TO app_runtime;
+
+-- -----------------------------------------------------------------------------
+-- 2. The two tables integrity_verifier cannot read, and why that is a decision.
+--
+-- V015 granted integrity_verifier SELECT on principal, principal_session, role, role_assignment and
+-- role_permission — and not on principal_credential or authentication_attempt. The omission was
+-- correct and undocumented, which is indistinguishable from forgetting. Recorded here rather than
+-- changed:
+--
+--   principal_credential holds Argon2id hashes. integrity_verifier is BYPASSRLS, so a SELECT here
+--   would put every tenant's credential material behind one read-only credential that exists to run
+--   a conformance job. The cost is real and is accepted: no conformance check can assert that stored
+--   cost parameters meet the SEC-SEC-014 floor. The floor is enforced by CHECK constraints on the
+--   table itself, which is the stronger place for it — a constraint cannot be skipped by a job nobody
+--   ran.
+--
+--   authentication_attempt holds presented identifiers and source addresses for every attempt,
+--   including failures against identifiers that do not exist. That is the enumeration signal
+--   SEC-PLT-003 reads and it is personal data about people who may not be users. Its append-only
+--   property is enforced by trg_attempt__append_only rather than by a job that reads it back.
+--
+-- Stated so the next reader does not "fix" it by adding the grants.
+-- -----------------------------------------------------------------------------
+
+-- -----------------------------------------------------------------------------
+-- 3. A note on reading privileges through information_schema.
+--
+-- information_schema.columns is filtered by the querying role's privileges, so a column on a table
+-- the role cannot read is ABSENT rather than reported. Checking whether V016 had applied by counting
+-- rows there reported principal_credential.set_by as missing when it was present — a false negative
+-- produced by the least-privilege model working correctly.
+--
+-- pg_attribute and has_table_privilege are not filtered that way. The post-deployment conformance job
+-- uses pg_class and pg_constraint throughout for the same reason; this note exists because the
+-- shortcut is tempting and its failure mode is a check that quietly reports the wrong answer.
+-- -----------------------------------------------------------------------------

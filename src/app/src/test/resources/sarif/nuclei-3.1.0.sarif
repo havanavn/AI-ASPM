@@ -1,0 +1,55 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "nuclei",
+          "version": "3.1.0",
+          "informationUri": "https://nuclei.projectdiscovery.io",
+          "rules": [
+            {
+              "id": "http/exposures/configs/git-config",
+              "name": "Git Configuration Exposure",
+              "shortDescription": { "text": "Git configuration file exposed" },
+              "defaultConfiguration": { "level": "error" },
+              "properties": { "tags": [ "config", "exposure", "git" ], "severity": "medium" }
+            },
+            {
+              "id": "http/misconfiguration/http-missing-security-headers",
+              "shortDescription": { "text": "Security headers missing" },
+              "defaultConfiguration": { "level": "note" }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "http/exposures/configs/git-config",
+          "level": "error",
+          "message": { "text": "Git configuration file is reachable without authentication." },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "https://booking.example.vn/.git/config" }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "http/misconfiguration/http-missing-security-headers",
+          "level": "note",
+          "message": { "text": "strict-transport-security header is missing." },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "https://booking.example.vn/login" }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,81 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "mobsfscan",
+          "version": "0.3.6",
+          "informationUri": "https://github.com/MobSF/mobsfscan",
+          "rules": [
+            {
+              "id": "android_certificate_transparency",
+              "name": "android_certificate_transparency",
+              "shortDescription": { "text": "Certificate transparency is not enforced" },
+              "fullDescription": { "text": "The app does not enforce certificate transparency, which allows a mis-issued certificate to go undetected." },
+              "defaultConfiguration": { "level": "warning" },
+              "properties": { "cwe": "CWE-295", "masvs": "MSTG-NETWORK-4", "owasp-mobile": "M3: Insecure Communication" }
+            },
+            {
+              "id": "android_kotlin_hardcoded",
+              "name": "android_kotlin_hardcoded",
+              "shortDescription": { "text": "Hardcoded secret found in source" },
+              "defaultConfiguration": { "level": "error" },
+              "properties": { "cwe": "CWE-798", "masvs": "MSTG-STORAGE-14" }
+            },
+            {
+              "id": "android_webview_debug",
+              "shortDescription": { "text": "Remote WebView debugging is enabled" },
+              "defaultConfiguration": { "level": "warning" },
+              "properties": { "cwe": "CWE-919" }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "android_certificate_transparency",
+          "message": { "text": "Certificate transparency is not enforced by the network security configuration." },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "app/src/main/res/xml/network_security_config.xml" },
+                "region": { "startLine": 4 }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "android_kotlin_hardcoded",
+          "level": "error",
+          "message": { "text": "A hardcoded secret was found in this file." },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "app/src/main/java/vn/example/booking/ApiConfig.kt" },
+                "region": { "startLine": 19 }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "android_webview_debug",
+          "message": { "text": "setWebContentsDebuggingEnabled is set to true." },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "app/src/main/java/vn/example/booking/WebActivity.kt" },
+                "region": { "startLine": 57 }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "android_missing_location_detail",
+          "message": { "text": "A finding whose location the tool did not report." }
+        }
+      ]
+    }
+  ]
+}

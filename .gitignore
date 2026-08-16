@@ -1,0 +1,90 @@
+# =============================================================================================
+# What must never reach the remote, and why.
+#
+# The first two sections are the ones that matter. Everything below them is noise control.
+# =============================================================================================
+
+# ---------------------------------------------------------------------------------------------
+# Secrets. OPS-DEP-019: secrets are injected at runtime and are not present in environment files
+# committed to source. `.env.example` IS committed — it is the template and holds no value.
+# ---------------------------------------------------------------------------------------------
+.env
+*.env
+!*.env.example
+deploy/.env
+**/.env.local
+*.pem
+*.key
+!**/src/**/*.key
+*.p12
+*.jks
+*.keystore
+credentials.json
+secrets.yaml
+
+# ---------------------------------------------------------------------------------------------
+# Assistant working files.
+#
+# CLAUDE.md is the project instruction file, IMPLEMENTATION_PROMPTS.md is the prompt sequence
+# written against it, and .claude/ holds session state and settings. They are how this repository
+# was built, not part of what it is; a reader of the product should not have to route around them.
+# Remove a line here if you decide the instructions belong in the open — CLAUDE.md in particular
+# is the only place several conventions are written down.
+# ---------------------------------------------------------------------------------------------
+CLAUDE.md
+IMPLEMENTATION_PROMPTS.md
+.claude/
+.claude*/
+**/.claude/
+CLAUDE.local.md
+.cursor/
+.aider*
+.mcp.json
+
+# ---------------------------------------------------------------------------------------------
+# Build output. Reproducible from source, and large: src/app/build alone is 85 MB and
+# src/webui/node_modules is 293 MB.
+#
+# The compiled interface bundle under src/app/src/main/resources/aspm/app/webui/assets IS
+# committed on purpose — the application serves it, and the deployment has no Node step.
+# ---------------------------------------------------------------------------------------------
+build/
+out/
+bin/
+!deploy/app/bin/
+.gradle/
+gradle-app.setting
+node_modules/
+.vite/
+*.class
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+*.war
+
+# The runnable image content is copied here at deploy time from src/app/build/install.
+deploy/app/install/
+
+# ---------------------------------------------------------------------------------------------
+# Local runtime state — a container's data directory, logs, and anything a probe wrote.
+# ---------------------------------------------------------------------------------------------
+deploy/postgres/data/
+deploy/**/data/
+*.log
+logs/
+*.pid
+scratch/
+tmp/
+.tmp/
+
+# ---------------------------------------------------------------------------------------------
+# Editor and operating system.
+# ---------------------------------------------------------------------------------------------
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini

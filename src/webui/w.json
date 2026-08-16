@@ -1,0 +1,1 @@
+{"secret":"e789106a4703daf1b92aa1c96cf3f67f22ce0e8bfb68f273c6fe8144b0dcc759","signingNote":"Deliveries carry X-ASPM-Signature: sha256=<HMAC of the body with this secret>. It is shown once."}

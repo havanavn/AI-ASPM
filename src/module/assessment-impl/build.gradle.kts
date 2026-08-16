@@ -1,0 +1,17 @@
+        // assessment [core] implementation — domain, application, infrastructure.
+        dependencies {
+            api(project(":module:assessment-contract"))
+            implementation(project(":platform-events"))
+            implementation(project(":platform-kernel:tenant-context-contract"))
+implementation(project(":platform-kernel:authorization-contract"))
+implementation(project(":platform-kernel:audit-contract"))
+implementation(project(":platform-kernel:schema-registry-contract"))
+implementation(project(":platform-kernel:rules-engine-contract"))
+
+// Permitted cross-module dependencies (CON-PLT-014). This list is the encoding
+// of DOC-03 section 5.3 for this module; a dependency not listed here is not on
+// the compile classpath, so a prohibited-direction import is a compile error.
+implementation(project(":module:ingestion-contract"))
+implementation(project(":module:asset-inventory-contract"))
+implementation(project(":module:organization-scope-contract"))
+        }

@@ -1,0 +1,202 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* The palette. Slate-neutral with a single blue accent, tuned so that the severity colours below
+   never have to compete with a coloured chrome for attention — the only saturated things on a page
+   should be the things that are wrong. */
+:root {
+  --radius: 0.5rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.2 0.02 260);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.2 0.02 260);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.2 0.02 260);
+  --primary: oklch(0.48 0.19 265);
+  --primary-foreground: oklch(0.98 0.005 260);
+  --secondary: oklch(0.96 0.005 260);
+  --secondary-foreground: oklch(0.25 0.02 260);
+  --muted: oklch(0.96 0.005 260);
+  --muted-foreground: oklch(0.52 0.015 260);
+  --accent: oklch(0.95 0.01 260);
+  --accent-foreground: oklch(0.25 0.02 260);
+  --destructive: oklch(0.58 0.22 27);
+  --border: oklch(0.91 0.008 260);
+  --input: oklch(0.91 0.008 260);
+  --ring: oklch(0.48 0.19 265);
+  --sidebar: oklch(0.985 0.003 260);
+  --sidebar-foreground: oklch(0.2 0.02 260);
+  --sidebar-border: oklch(0.91 0.008 260);
+
+  /* Severity and state. Named for what they MEAN, not for the colour, so that a tenant renaming its
+     severity scale does not need a stylesheet change — and so that nothing reads "red" in code. */
+  --sev-critical: oklch(0.5 0.21 22);
+  --sev-high:     oklch(0.62 0.19 42);
+  --sev-medium:   oklch(0.72 0.15 82);
+  --sev-low:      oklch(0.62 0.11 200);
+  --tone-ok:      oklch(0.58 0.13 155);
+  --tone-warn:    oklch(0.68 0.15 70);
+  --tone-info:    oklch(0.58 0.13 245);
+  --tone-unknown: oklch(0.6 0.01 260);
+  /* Planning: the KIND of assessment work, never its state. Two hues, chosen by measurement rather
+     than taste — simulated against deuteranopia they separate at ΔE 24 (light) and 21 (dark), where
+     8 is the floor. Hue 305 and 130 are used because every status band above is taken — red 22,
+     orange 42, yellow 82, green 155, cyan 200, blue 245 — and borrowing one would make "this is a
+     full review" read as a severity.
+
+     The first draft used grey for `plan-other`, which collided with the neutral the STATE legend
+     demonstrates with: "Other assessment" and "Completed" rendered as the same grey square in two
+     different legend groups. Giving the second kind a real hue is what frees a true neutral to mean
+     "this swatch is showing a state, not a kind". */
+  --plan-review:  oklch(0.52 0.2 305);
+  --plan-other:   oklch(0.52 0.11 130);
+}
+
+.dark {
+  --background: oklch(0.17 0.015 265);
+  --foreground: oklch(0.95 0.005 260);
+  --card: oklch(0.21 0.017 265);
+  --card-foreground: oklch(0.95 0.005 260);
+  --popover: oklch(0.21 0.017 265);
+  --popover-foreground: oklch(0.95 0.005 260);
+  --primary: oklch(0.68 0.16 262);
+  --primary-foreground: oklch(0.17 0.015 265);
+  --secondary: oklch(0.26 0.018 265);
+  --secondary-foreground: oklch(0.95 0.005 260);
+  --muted: oklch(0.26 0.018 265);
+  --muted-foreground: oklch(0.68 0.012 260);
+  --accent: oklch(0.28 0.02 265);
+  --accent-foreground: oklch(0.95 0.005 260);
+  --destructive: oklch(0.65 0.2 25);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.68 0.16 262);
+  --sidebar: oklch(0.19 0.016 265);
+  --sidebar-foreground: oklch(0.95 0.005 260);
+  --sidebar-border: oklch(1 0 0 / 10%);
+
+  --sev-critical: oklch(0.68 0.2 22);
+  --sev-high:     oklch(0.75 0.16 45);
+  --sev-medium:   oklch(0.82 0.13 85);
+  --sev-low:      oklch(0.72 0.1 205);
+  --tone-ok:      oklch(0.72 0.13 155);
+  --tone-warn:    oklch(0.8 0.13 75);
+  --tone-info:    oklch(0.72 0.12 245);
+  --tone-unknown: oklch(0.68 0.012 260);
+  --plan-review:  oklch(0.72 0.17 305);
+  --plan-other:   oklch(0.68 0.1 130);
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sev-critical: var(--sev-critical);
+  --color-sev-high: var(--sev-high);
+  --color-sev-medium: var(--sev-medium);
+  --color-sev-low: var(--sev-low);
+  --color-tone-ok: var(--tone-ok);
+  --color-tone-warn: var(--tone-warn);
+  --color-tone-info: var(--tone-info);
+  --color-tone-unknown: var(--tone-unknown);
+  --color-plan-review: var(--plan-review);
+  --color-plan-other: var(--plan-other);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+}
+
+@layer base {
+  * { @apply border-border outline-ring/50; }
+  body { @apply bg-background text-foreground antialiased; }
+  /* Tabular figures everywhere a number is compared down a column. A count that shifts left and
+     right as it changes width is a count nobody can scan. */
+  .tabular { font-variant-numeric: tabular-nums; }
+}
+
+/* ===== CKEditor =====
+   The editor ships its own variables; these map them onto the platform's palette so an editor
+   dropped into a card does not arrive as a white rectangle in a dark interface. */
+.rich-text .ck.ck-editor__editable { min-block-size: var(--ck-min-height, 10rem); }
+.rich-text .ck.ck-editor__main > .ck-editor__editable,
+.rich-text .ck.ck-toolbar {
+  background: var(--background);
+  color: var(--foreground);
+  border-color: var(--border);
+}
+.rich-text .ck.ck-toolbar { border-start-start-radius: var(--radius); border-start-end-radius: var(--radius); }
+.rich-text .ck.ck-editor__main > .ck-editor__editable {
+  border-end-start-radius: var(--radius); border-end-end-radius: var(--radius);
+}
+.rich-text .ck.ck-editor__main > .ck-editor__editable.ck-focused {
+  border-color: var(--ring); box-shadow: 0 0 0 1px var(--ring);
+}
+.rich-text .ck.ck-button, .rich-text .ck.ck-dropdown__button { color: var(--foreground); }
+.rich-text .ck.ck-button:not(.ck-disabled):hover { background: var(--accent); }
+.rich-text .ck.ck-button.ck-on { background: var(--primary); color: var(--primary-foreground); }
+.rich-text .ck.ck-list, .rich-text .ck.ck-balloon-panel, .rich-text .ck.ck-dropdown__panel {
+  background: var(--popover); color: var(--popover-foreground); border-color: var(--border);
+}
+.rich-text .ck-content img { max-inline-size: 100%; block-size: auto; border-radius: var(--radius-md); }
+
+/* ===== Server-rendered prose =====
+   What Markdown.java produces. Styled here rather than inline so that the one renderer stays the
+   only thing deciding what markup exists — this decides only how it looks. */
+.prose { font-size: 0.875rem; line-height: 1.65; }
+/* Markdown.java starts headings at h3 — the page owns h1 and the card owns h2 — so `##` arrives as
+   h4 and `###` as h5. Both used to be the same size as body text and h5 was not styled at all, which
+   on a five-hundred-line guide meant a document with no visible hierarchy: every section title read
+   as a bold sentence. Sizes step down, and the top rule separates sections without a heavier weight. */
+.prose h3 { font-size: 1.1rem; font-weight: 650; margin-block: 1.4em 0.5em; letter-spacing: -0.01em; }
+.prose h4 {
+  font-size: 1rem; font-weight: 650; margin-block: 1.6em 0.5em; letter-spacing: -0.01em;
+  padding-block-start: 0.7em; border-block-start: 1px solid var(--border);
+}
+.prose h5 { font-size: 0.9rem; font-weight: 650; margin-block: 1.1em 0.35em; }
+.prose h6 { font-size: 0.85rem; font-weight: 600; margin-block: 1em 0.3em; color: var(--muted-foreground); }
+/* The first heading in a document needs no separator above it — there is nothing to separate it from. */
+.prose > :first-child { margin-block-start: 0; padding-block-start: 0; border-block-start: none; }
+.prose p { margin-block: 0.6em; }
+.prose ul, .prose ol { margin-block: 0.6em; padding-inline-start: 1.4em; }
+.prose ul { list-style: disc; }
+.prose ol { list-style: decimal; }
+.prose blockquote {
+  margin-block: 0.7em; padding-inline-start: 0.9em;
+  border-inline-start: 3px solid var(--border); color: var(--muted-foreground);
+}
+.prose code.md-inline, .prose :not(pre) > code {
+  font-family: var(--font-mono); font-size: 0.8em;
+  background: var(--muted); padding: 0.1em 0.35em; border-radius: 3px;
+}
+.prose pre { background: var(--muted); padding: 0.75em; border-radius: var(--radius-md); overflow-x: auto; }
+.prose pre code { font-family: var(--font-mono); font-size: 0.8em; }
+.prose table { width: 100%; border-collapse: collapse; margin-block: 0.7em; font-size: 0.8125rem; }
+.prose th, .prose td { border: 1px solid var(--border); padding: 0.35em 0.6em; text-align: left; }
+.prose th { background: var(--muted); font-weight: 600; }
+.prose a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
+.prose img.md-image {
+  display: block; max-inline-size: 100%; block-size: auto; margin-block: 0.8em;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+}
