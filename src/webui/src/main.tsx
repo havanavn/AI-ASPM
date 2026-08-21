@@ -22,6 +22,8 @@ import { PipelineFindingPage } from "@/pages/PipelineFindingPage";
 import { ProjectsPage } from "@/pages/ProjectsPage";
 import { NewRequestPage } from "@/pages/NewRequestPage";
 import { ProjectPage } from "@/pages/ProjectPage";
+import { HostsPage } from "@/pages/HostsPage";
+import { ProjectEditPage } from "@/pages/ProjectEditPage";
 import { AccountPage } from "@/pages/AccountPage";
 import { GuidePage } from "@/pages/GuidePage";
 import { ApiGuidePage } from "@/pages/ApiGuidePage";
@@ -76,7 +78,9 @@ function App() {
           <Route path="applications/:id" element={<ApplicationPage />} />
           <Route path="applications/:id/edit" element={<ApplicationEditPage />} />
           <Route path="projects" element={<ProjectsPage />} />
+          <Route path="hosts" element={<HostsPage />} />
           <Route path="projects/:id" element={<ProjectPage />} />
+          <Route path="projects/:id/edit" element={<ProjectEditPage />} />
           <Route path="requests/new" element={<NewRequestPage />} />
           <Route path="organization" element={<OrganizationPage />} />
           <Route path="account" element={<AccountPage />} />

@@ -247,7 +247,7 @@ export function CompositionPage() {
         ))}
       </div>
 
-      {tab === "estate" && <Estate data={data} org={org} severity={severity} />}
+      {tab === "estate" && <Estate data={data} org={org} severity={severity} onOrg={setOrg} />}
       {tab === "advisories" && <AdvisorySearch initial={data.topAdvisories} />}
       {tab === "components" && <ComponentSearch initial={data.topComponents} />}
     </div>
@@ -258,7 +258,9 @@ export function CompositionPage() {
 // The estate: what arrived and what closed, then where it all sits
 // ================================================================================================
 
-function Estate({ data, org, severity }: { data: Payload; org: string; severity: string }) {
+function Estate({ data, org, severity, onOrg }: {
+  data: Payload; org: string; severity: string; onOrg: (next: string) => void;
+}) {
   const measured = data.timeline.some((m) => m.snapshots + m.appeared + m.resolved > 0);
   return (
     <div className="flex flex-col gap-5">
@@ -303,7 +305,7 @@ function Estate({ data, org, severity }: { data: Payload; org: string; severity:
         </Card>
       </div>
 
-      <EstateTree org={org} severity={severity} />
+      <EstateTree org={org} severity={severity} onOrg={onOrg} />
     </div>
   );
 }
@@ -424,7 +426,11 @@ function SbomActions({ row, onDone }: { row: TreeRow; onDone: () => void }) {
   );
 }
 
-function EstateTree({ org, severity }: { org: string; severity: string }) {
+// `onOrg` is threaded from the page rather than re-derived here. The filter has one implementation
+// and one place that owns the query string; a second copy would drift the day either changes.
+function EstateTree({ org, severity, onOrg }: {
+  org: string; severity: string; onOrg: (next: string) => void;
+}) {
   const [levels, setLevels] = useState<Record<string, TreeRow[]>>({});
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<Set<string>>(new Set());
@@ -542,7 +548,7 @@ function EstateTree({ org, severity }: { org: string; severity: string }) {
                     one". The same `org` parameter the projects and CI/CD tables use. */}
                 {row.orgName ? (
                   <button type="button" className="text-left hover:underline"
-                          onClick={() => setOrg(row.orgId ?? ANY)}>{row.orgName}</button>
+                          onClick={() => onOrg(row.orgId ?? ANY)}>{row.orgName}</button>
                 ) : (
                   <span className="italic text-tone-unknown">unowned</span>
                 )}

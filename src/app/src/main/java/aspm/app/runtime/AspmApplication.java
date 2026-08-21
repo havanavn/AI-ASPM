@@ -368,6 +368,12 @@ public final class AspmApplication {
                 webApi::project));
         routes.add(new Dispatcher.Route("GET",
                 new PathTemplate("/api/ui/projects/{id}/requests"), webApi::projectRequests));
+        // The project record editor. Registered before /projects/{id}/access so neither template can
+        // shadow the other; PathTemplate matches on registration order.
+        routes.add(new Dispatcher.Route("GET",
+                new PathTemplate("/api/ui/projects/{id}/editor"), editorApi::projectEditor));
+        routes.add(new Dispatcher.Route("POST",
+                new PathTemplate("/api/ui/projects/{id}/editor"), editorApi::projectSave));
         // The same handler as the application posture. A project is an asset of the same aggregate
         // (ADR-009) and every rollup it reads is rooted at whatever asset it is asked about.
         routes.add(new Dispatcher.Route("GET",
@@ -391,6 +397,8 @@ public final class AspmApplication {
         routes.add(new Dispatcher.Route("POST",
                 new PathTemplate("/api/ui/board/{id}/findings/{findingId}/remediation"),
                 webApi::claimRemediation));
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/hosts"),
+                webApi::hosts));
         routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/organization"),
                 webApi::organization));
         routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/overview"),
@@ -435,6 +443,35 @@ public final class AspmApplication {
         routes.add(new Dispatcher.Route("POST",
                 new PathTemplate("/api/ui/applications/{id}/retire"),
                 editorApi::applicationRetire));
+        // The declared-field catalogue. Registered before the organization routes purely to keep the
+        // settings surface together; PathTemplate matches on registration order and none of these
+        // can shadow another.
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/settings/fields"),
+                editorApi::fieldCatalogue));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/settings/fields"),
+                editorApi::fieldCreate));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/settings/fields/{id}"),
+                editorApi::fieldUpdate));
+        routes.add(new Dispatcher.Route("POST",
+                new PathTemplate("/api/ui/settings/fields/{id}/lifecycle"),
+                editorApi::fieldLifecycle));
+        routes.add(new Dispatcher.Route("POST",
+                new PathTemplate("/api/ui/settings/fields/{id}/move"), editorApi::fieldMove));
+        // The endpoint environment catalogue. Same five shapes as the field catalogue above it and
+        // the same permission on the writes: it is the other half of the same tenant vocabulary.
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/settings/environments"),
+                editorApi::environmentCatalogue));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/settings/environments"),
+                editorApi::environmentCreate));
+        routes.add(new Dispatcher.Route("POST",
+                new PathTemplate("/api/ui/settings/environments/{id}"),
+                editorApi::environmentUpdate));
+        routes.add(new Dispatcher.Route("POST",
+                new PathTemplate("/api/ui/settings/environments/{id}/lifecycle"),
+                editorApi::environmentLifecycle));
+        routes.add(new Dispatcher.Route("POST",
+                new PathTemplate("/api/ui/settings/environments/{id}/move"),
+                editorApi::environmentMove));
         routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/organization"),
                 editorApi::nodeCreate));
         routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/organization/{id}"),

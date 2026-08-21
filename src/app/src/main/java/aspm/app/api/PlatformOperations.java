@@ -346,6 +346,66 @@ public final class PlatformOperations {
         operations.add(new OperationRegistry.Operation("GET", "/api/ui/projects/{id}/requests",
                 AnnotationClass.A_SCOPED_READ, Optional.of(aspm.app.ui.RequestPages.READ),
                 Set.of(), Set.of()));
+        // Reading and writing one project's record. B_SCOPED_WRITE rather than E_CONFIGURATION for
+        // the save: this changes a domain object inside the caller's scope, not the tenant's
+        // configuration. The FIELDS available are configuration and are declared elsewhere; filling
+        // them in for one project is ordinary inventory work, and requiring a fresh second factor for
+        // it would put a step-up in front of the most routine edit on the platform.
+        operations.add(new OperationRegistry.Operation("GET", "/api/ui/projects/{id}/editor",
+                AnnotationClass.A_SCOPED_READ, Optional.of(aspm.app.ui.ApplicationPages.READ),
+                Set.of(), Set.of()));
+        operations.add(new OperationRegistry.Operation("POST", "/api/ui/projects/{id}/editor",
+                AnnotationClass.B_SCOPED_WRITE, Optional.of(aspm.app.ui.ApplicationPages.UPDATE),
+                Set.of(), Set.of()));
+        // The declared-field catalogue. E_CONFIGURATION on every write: this is tenant configuration
+        // and it is not scoped — a field declared on PROJECT changes what every project in the tenant
+        // is asked for, in every branch of the organization tree, so there is no object to
+        // re-validate against and no scope that could narrow it.
+        //
+        // The READ is A_SCOPED_READ on the same permission, deliberately: the catalogue is not
+        // sensitive — every form already renders it — and requiring the management permission to
+        // LOOK would leave somebody staring at a field they cannot explain with no way to read its
+        // purpose. Managing is gated; reading the definitions is not.
+        // The host reverse lookup. A_SCOPED_READ on the asset read permission: it answers a question
+        // about assets the caller can already reach, and the scope predicate is applied to the
+        // ATTACHED asset rather than to the domain — a domain has no owner, which is the whole reason
+        // it is a shared asset. Two readers searching the same host each see only their own side.
+        operations.add(new OperationRegistry.Operation("GET", "/api/ui/hosts",
+                AnnotationClass.A_SCOPED_READ, Optional.of(aspm.app.ui.ApplicationPages.READ),
+                Set.of(), Set.of()));
+        operations.add(new OperationRegistry.Operation("GET", "/api/ui/settings/fields",
+                AnnotationClass.A_SCOPED_READ, Optional.of(aspm.app.ui.ApplicationPages.READ),
+                Set.of(), Set.of()));
+        operations.add(new OperationRegistry.Operation("POST", "/api/ui/settings/fields",
+                AnnotationClass.E_CONFIGURATION,
+                Optional.of(aspm.app.inventory.InventoryService.FIELD_ADMIN), Set.of(), Set.of()));
+        operations.add(new OperationRegistry.Operation("POST", "/api/ui/settings/fields/{id}",
+                AnnotationClass.E_CONFIGURATION,
+                Optional.of(aspm.app.inventory.InventoryService.FIELD_ADMIN), Set.of(), Set.of()));
+        operations.add(new OperationRegistry.Operation("POST",
+                "/api/ui/settings/fields/{id}/lifecycle", AnnotationClass.E_CONFIGURATION,
+                Optional.of(aspm.app.inventory.InventoryService.FIELD_ADMIN), Set.of(), Set.of()));
+        operations.add(new OperationRegistry.Operation("POST", "/api/ui/settings/fields/{id}/move",
+                AnnotationClass.E_CONFIGURATION,
+                Optional.of(aspm.app.inventory.InventoryService.FIELD_ADMIN), Set.of(), Set.of()));
+        // The endpoint environment catalogue — the vocabulary both inventory editors render their
+        // domain inputs from. A read anyone who can read the inventory may make, because the labels
+        // appear on every list; writes are class E under the same permission as the field catalogue.
+        operations.add(new OperationRegistry.Operation("GET", "/api/ui/settings/environments",
+                AnnotationClass.A_SCOPED_READ, Optional.of(aspm.app.ui.ApplicationPages.READ),
+                Set.of(), Set.of()));
+        operations.add(new OperationRegistry.Operation("POST", "/api/ui/settings/environments",
+                AnnotationClass.E_CONFIGURATION,
+                Optional.of(aspm.app.inventory.InventoryService.FIELD_ADMIN), Set.of(), Set.of()));
+        operations.add(new OperationRegistry.Operation("POST", "/api/ui/settings/environments/{id}",
+                AnnotationClass.E_CONFIGURATION,
+                Optional.of(aspm.app.inventory.InventoryService.FIELD_ADMIN), Set.of(), Set.of()));
+        operations.add(new OperationRegistry.Operation("POST",
+                "/api/ui/settings/environments/{id}/lifecycle", AnnotationClass.E_CONFIGURATION,
+                Optional.of(aspm.app.inventory.InventoryService.FIELD_ADMIN), Set.of(), Set.of()));
+        operations.add(new OperationRegistry.Operation("POST",
+                "/api/ui/settings/environments/{id}/move", AnnotationClass.E_CONFIGURATION,
+                Optional.of(aspm.app.inventory.InventoryService.FIELD_ADMIN), Set.of(), Set.of()));
         // The posture dashboard for one project. Registered separately from the application one even
         // though a single handler serves both, so that the two can be authorized apart if a tenant
         // ever needs that — and so neither is reachable through the other's absence.

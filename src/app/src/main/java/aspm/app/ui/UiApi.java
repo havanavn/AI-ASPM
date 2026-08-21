@@ -1489,6 +1489,7 @@ public final class UiApi {
             new NavEntry("/pipeline", "nav.pipeline", "vul.finding.read"),
             new NavEntry("/applications", "nav.applications", "ast.asset.read"),
             new NavEntry("/projects", "nav.projects", "ast.asset.read"),
+            new NavEntry("/hosts", "nav.hosts", "ast.asset.read"),
             new NavEntry("/organization", "nav.organization", "org.node.read"),
             // Not converted; the router hands this one off to the server-rendered page.
             //
@@ -2064,8 +2065,81 @@ public final class UiApi {
                     long completed = c == null ? 0L : c.completed();
                     return atLeast ? completed >= target.intValue() : completed == target.intValue();
                 };
+        // Project fields, folded onto the application above them. A project is part of an
+        // application, so every fact recorded on one is a fact about part of it — and "which of our
+        // applications still have something behind no WAF" is a question about applications that can
+        // only be answered from project rows.
+        List<aspm.app.inventory.InventoryService.AttributeDefinition> projectFields =
+                inventory.attributeDefinitions(principal,
+                        aspm.app.inventory.ProjectQuery.PROJECT_TYPE);
+        Map<UUID, Map<String, Object>> folded =
+                new aspm.app.inventory.ProjectQuery(dataSource)
+                        .attributesByApplication(principal, projectFields);
+
+        // Filtered here rather than in the asset query, because the values being matched do not live
+        // on the asset: they are the fold of its projects', and there is no column to index. The
+        // applications list is not server-paged, so narrowing it here loses nothing — the same
+        // reasoning the review filter above is applied under.
+        Map<String, String> attributeFilters = attributeFiltersOf(request);
+        java.util.function.Predicate<aspm.app.inventory.InventoryService.Application> byAttribute =
+                app -> {
+                    if (attributeFilters.isEmpty()) {
+                        return true;
+                    }
+                    Map<String, Object> values = folded.get(app.id());
+                    // An application with no projects matches no attribute filter. Not a bug: it has
+                    // no project carrying the value, and admitting it would report an estate as
+                    // covered by a fact nobody recorded (PP-1).
+                    if (values == null) {
+                        return false;
+                    }
+                    for (Map.Entry<String, String> filter : attributeFilters.entrySet()) {
+                        Object held = values.get(filter.getKey());
+                        boolean matched = held instanceof List<?> list
+                                ? list.stream().anyMatch(
+                                        v -> String.valueOf(v).equals(filter.getValue()))
+                                : held != null && String.valueOf(held).equals(filter.getValue());
+                        if (!matched) {
+                            return false;
+                        }
+                    }
+                    return true;
+                };
+
+        // The tenant's environment vocabulary, read once. It decides both which host filters are
+        // legitimate and which domain columns the picker may offer; deriving those separately is how
+        // the two editors came to offer different environments from each other.
+        List<aspm.app.inventory.InventoryService.EndpointEnvironment> environments =
+                inventory.endpointEnvironments(principal);
+        List<aspm.app.inventory.InventoryService.HostFilter> hostFilters =
+                hostFiltersOf(request, environments);
+
+        // Hosts published on the application OR on anything beneath it. An application's reachable
+        // surface is its own plus its parts', and the host is almost always attached to a project or
+        // a service rather than to the application row itself — so descendants are included, or the
+        // column would be empty on nearly every application that actually has one.
+        //
+        // *** READ FOR EVERY CANDIDATE ROW, NOT FOR THE SHOWN ONES, AND THAT ORDER IS THE POINT. ***
+        // The host filter below runs over this map. Populating it after the filter — which is what
+        // this did while the columns were unfilterable — would filter against an empty map and match
+        // nothing, or everything, depending on which way the predicate was written. Still one query.
+        Map<UUID, Map<String, java.util.TreeSet<String>>> hosts = inventory.hostsByAsset(principal,
+                rows.stream().map(aspm.app.inventory.InventoryService.Application::id).toList(),
+                true);
+        // An application matches on the hosts of its own parts, which is the same reach the column
+        // displays and the same reach the projects list filters over.
+        java.util.function.Predicate<aspm.app.inventory.InventoryService.Application> byHost =
+                app -> {
+                    for (var filter : hostFilters) {
+                        if (!filter.matches(hosts.get(app.id()))) {
+                            return false;
+                        }
+                    }
+                    return true;
+                };
+
         List<aspm.app.inventory.InventoryService.Application> shown =
-                rows.stream().filter(byReviews).toList();
+                rows.stream().filter(byReviews).filter(byAttribute).filter(byHost).toList();
 
         List<Map<String, Object>> out = new ArrayList<>();
         for (var app : shown) {
@@ -2090,6 +2164,19 @@ public final class UiApi {
             entry.put("findingCount", app.findingCount());
             entry.put("requestCount", app.requestCount());
             entry.put("projectCount", projects.getOrDefault(app.id(), 0L));
+            // The fold of its projects' declared fields. ABSENT, not empty, where the application
+            // has no project: "nothing recorded because there is nothing to record" and "nothing
+            // recorded because nobody has" are different answers and the table draws them apart.
+            Map<String, Object> rolled = folded.get(app.id());
+            Map<String, java.util.TreeSet<String>> appHosts = hosts.get(app.id());
+            if (rolled != null || appHosts != null) {
+                Map<String, Object> merged =
+                        new LinkedHashMap<>(rolled == null ? Map.of() : rolled);
+                mergeHosts(merged, appHosts);
+                entry.put("projectAttributes", merged);
+            } else {
+                entry.put("projectAttributes", null);
+            }
             entry.put("cadence", cadence(cadence.get(app.id())));
             out.add(entry);
         }
@@ -2114,6 +2201,16 @@ public final class UiApi {
         // Both maps travel, and the interface shows whichever matches the toggle's current position.
         body.put("reviewCounts", Map.of("exact", exact, "atLeast", atLeastCounts));
         body.put("reviewChoices", Integer.valueOf(REVIEW_CHOICES));
+        // The PROJECT catalogue, minus the kinds that cannot be folded. A description or an
+        // architecture link concatenated across four projects is a cell nobody reads and a filter
+        // that matches by accident, so the picker is not offered them here at all — rather than
+        // offering a column that turns out to be noise.
+        List<Map<String, Object>> foldable =
+                new ArrayList<>(projectFields.stream()
+                        .filter(f -> !List.of("TEXT", "LONG_TEXT", "URL").contains(f.dataType()))
+                        .map(UiApi::columnField).toList());
+        foldable.addAll(hostColumns(environments));
+        body.put("projectFields", foldable);
         body.put("mayWrite", principal.holds("ast.asset.update"));
         return json(body);
     }
@@ -2945,8 +3042,23 @@ public final class UiApi {
         // the vulnerability dashboard. One parameter, one meaning, everywhere (product principle 10) —
         // two pages spelling the same filter differently is how a shared link stops working.
         List<UUID> org = uuidList(request.query().get("org"));
+        // The tenant's declared field catalogue for PROJECT. Read once and used three times: to
+        // validate the attribute filters, to tell the table which columns it may offer, and to give
+        // the filter bar its dropdown values. One read, so the three cannot disagree.
+        List<aspm.app.inventory.InventoryService.AttributeDefinition> fields =
+                inventory.attributeDefinitions(principal,
+                        aspm.app.inventory.ProjectQuery.PROJECT_TYPE);
+        Map<String, String> attributeFilters = attributeFiltersOf(request);
+        // The environment vocabulary, read once and used three times, exactly as the field catalogue
+        // above it: to validate the host filters, to tell the table which domain columns it may
+        // offer, and to give the filter bar its labels. One read, so the three cannot disagree.
+        List<aspm.app.inventory.InventoryService.EndpointEnvironment> environments =
+                inventory.endpointEnvironments(principal);
+        List<aspm.app.inventory.InventoryService.HostFilter> hostFilters =
+                hostFiltersOf(request, environments);
         List<aspm.app.inventory.ProjectQuery.Project> rows = query.projects(principal,
-                request.query().getOrDefault("q", ""), application, org);
+                request.query().getOrDefault("q", ""), application, org, attributeFilters, fields,
+                hostFilters);
 
         List<Map<String, Object>> out = new ArrayList<>();
         long withSevere = 0;
@@ -2968,6 +3080,21 @@ public final class UiApi {
                 teams.add(project.owningNodeName());
             }
             out.add(project(project));
+        }
+        // Hosts, batched. One query for the whole page rather than one per row: this is the column
+        // somebody scans looking for a host they did not expect to see, and they cannot scan what
+        // costs a round trip each.
+        Map<UUID, Map<String, java.util.TreeSet<String>>> hosts = inventory.hostsByAsset(principal,
+                rows.stream().map(aspm.app.inventory.ProjectQuery.Project::id).toList(), true);
+        for (int i = 0; i < out.size(); i++) {
+            Object attributes = out.get(i).get("attributes");
+            if (attributes instanceof Map<?, ?>) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> typed = (Map<String, Object>) attributes;
+                Map<String, Object> merged = new LinkedHashMap<>(typed);
+                mergeHosts(merged, hosts.get(rows.get(i).id()));
+                out.get(i).put("attributes", merged);
+            }
         }
 
         // *** THE OPTIONS COME FROM AN UNFILTERED READ, AND THAT IS A CORRECTION. ***
@@ -3044,6 +3171,16 @@ public final class UiApi {
             }
         }
         body.put("raisable", raisable);
+        // The columns the table may offer, and the filters it may build. Sent whole rather than only
+        // the ones currently chosen: the picker has to list what is available, and a client that only
+        // learned about a field once somebody had already selected it could never offer it first.
+        List<Map<String, Object>> offered =
+                new ArrayList<>(fields.stream().map(UiApi::columnField).toList());
+        // Hosts are not a declared field — they are assets on the other end of an edge — but they are
+        // a column somebody wants for the same reason, so the picker offers them together rather than
+        // making the reader learn where the platform draws its internal line.
+        offered.addAll(hostColumns(environments));
+        body.put("fields", offered);
         return json(body);
     }
 
@@ -3432,14 +3569,269 @@ public final class UiApi {
         entry.put("scaOpen", project.scaOpen());
         entry.put("requestCount", project.requestCount());
         entry.put("lastDetectedAt", project.lastDetectedAt());
+        // The declared attribute document, typed. The table renders whichever of these the reader
+        // has chosen as columns, so a field added to the catalogue becomes available here with no
+        // change to this method.
+        entry.put("attributes", project.attributes());
+        entry.put("technicalContactName", project.technicalContactName());
         return entry;
     }
 
-    /** {@code GET /api/ui/organization}. */
+    /**
+     * Declared-attribute filters from the query string, as {@code attr.<key>=<value>}.
+     *
+     * <p>Prefixed so they cannot collide with a first-class filter now or later. A tenant is free to
+     * declare a field called {@code node} or {@code criticality}; without the prefix that field would
+     * silently take over the filter of the same name, and the failure would look like the built-in
+     * filter breaking.
+     */
+    private static Map<String, String> attributeFiltersOf(Dispatcher.Request request) {
+        Map<String, String> filters = new LinkedHashMap<>();
+        for (Map.Entry<String, String> entry : request.query().entrySet()) {
+            if (entry.getKey().startsWith("attr.") && entry.getValue() != null
+                    && !entry.getValue().isBlank()) {
+                filters.put(entry.getKey().substring("attr.".length()), entry.getValue());
+            }
+        }
+        return filters;
+    }
+
+    /**
+     * The domain columns, one per environment worth offering.
+     *
+     * <p>Dotted keys — {@code domain.PRODUCTION} — and that is what keeps them safe. A tenant's own
+     * field keys must match {@code ^[a-z][a-z0-9_]{1,48}$}, so a dot cannot occur in one: the prefix
+     * is structurally reserved rather than reserved by convention, and no declared field can ever
+     * collide with a domain column however the catalogue grows.
+     *
+     * <p><b>{@code HOSTNAME} rather than {@code MULTI_SELECT}, and filterable.</b> These were sent as
+     * a select with no permitted values and {@code filterable: false}, which made the picker offer a
+     * column nobody could narrow by — and because the filter key was validated against the declared
+     * field catalogue, a filter on one was silently discarded rather than refused. The kind is its own
+     * now, so the filter bar renders the two controls a hostname actually needs: whether one is
+     * recorded, and what it contains. It is <b>not</b> a declared-attribute storage kind and never
+     * reaches {@code asset_attribute_definition}; a domain is an asset on the far end of an edge.
+     *
+     * <p>An ACTIVE environment gets a column with nothing recorded in it, deliberately. "No UAT host
+     * recorded against this project" is the answer somebody is looking for, and suppressing the empty
+     * column is how the platform came to have no way of saying it.
+     */
+    private static List<Map<String, Object>> hostColumns(
+            List<aspm.app.inventory.InventoryService.EndpointEnvironment> environments) {
+        List<Map<String, Object>> fields = new ArrayList<>();
+        for (var environment : environments) {
+            if (!environment.columnWorthy()) {
+                continue;
+            }
+            Map<String, Object> field = new LinkedHashMap<>();
+            field.put("key", "domain." + environment.code());
+            field.put("environment", environment.code());
+            field.put("label", environment.label() + " domain");
+            field.put("dataType", "HOSTNAME");
+            field.put("permittedValues", List.of());
+            field.put("filterable", true);
+            field.put("required", false);
+            // The tenant's own sentence where there is one. A purpose written by whoever declared the
+            // environment says more than a generic line about substring matching ever will.
+            field.put("purpose", environment.purpose() == null || environment.purpose().isBlank()
+                    ? "Hosts recorded in this environment. Filter by whether one is recorded at all, "
+                            + "or by what the hostname contains — a domain is matched as a substring."
+                    : environment.purpose());
+            // Says which of the three states this is, so the picker can mark an environment that is
+            // only present because data carries it — the tenant has not declared it and a form will
+            // not offer it.
+            field.put("lifecycleState", environment.lifecycleState());
+            fields.add(field);
+        }
+        return fields;
+    }
+
+    /**
+     * Host filters, read from {@code host.<ENV>} and {@code hostState.<ENV>}.
+     *
+     * <p>Outside the {@code attr.} namespace on purpose: an environment is not a declared field, and
+     * folding it into that prefix is what let the filter be validated against the wrong catalogue and
+     * dropped. Two parameters rather than one encoded value, because a URL somebody pastes into a
+     * ticket should be legible.
+     *
+     * @param offered the environments this tenant has, declared or recorded. An unknown environment
+     *     is dropped rather than rejected — the stale-bookmark rule the attribute filters follow —
+     *     and because dropping it widens the result, the caller states that in the response
+     */
+    private static List<aspm.app.inventory.InventoryService.HostFilter> hostFiltersOf(
+            Dispatcher.Request request,
+            List<aspm.app.inventory.InventoryService.EndpointEnvironment> offered) {
+        java.util.Set<String> known = new java.util.LinkedHashSet<>();
+        for (var environment : offered) {
+            known.add(environment.code());
+        }
+        Map<String, String> contains = new LinkedHashMap<>();
+        Map<String, String> presence = new LinkedHashMap<>();
+        for (Map.Entry<String, String> parameter : request.query().entrySet()) {
+            String key = parameter.getKey();
+            if (key.startsWith("host.") && key.length() > "host.".length()) {
+                contains.put(key.substring("host.".length()), parameter.getValue());
+            } else if (key.startsWith("hostState.") && key.length() > "hostState.".length()) {
+                presence.put(key.substring("hostState.".length()), parameter.getValue());
+            }
+        }
+        java.util.Set<String> environments = new java.util.LinkedHashSet<>(contains.keySet());
+        environments.addAll(presence.keySet());
+        List<aspm.app.inventory.InventoryService.HostFilter> filters = new ArrayList<>();
+        for (String environment : environments) {
+            if (!known.contains(environment)) {
+                continue;
+            }
+            String state = presence.getOrDefault(environment, "");
+            // Only the two states the interface offers. Anything else is treated as no presence
+            // constraint rather than as an empty result, so a hand-edited URL narrows to nothing only
+            // when the person asked for that.
+            if (!"RECORDED".equals(state) && !"ABSENT".equals(state)) {
+                state = "";
+            }
+            var filter = new aspm.app.inventory.InventoryService.HostFilter(environment, state,
+                    contains.getOrDefault(environment, ""));
+            if (filter.active()) {
+                filters.add(filter);
+            }
+        }
+        return List.copyOf(filters);
+    }
+
+    /** Host sets folded into an attribute-shaped map, under the reserved dotted keys. */
+    private static void mergeHosts(Map<String, Object> into,
+            Map<String, java.util.TreeSet<String>> hosts) {
+        if (hosts == null) {
+            return;
+        }
+        for (Map.Entry<String, java.util.TreeSet<String>> entry : hosts.entrySet()) {
+            into.put("domain." + entry.getKey(), List.copyOf(entry.getValue()));
+        }
+    }
+
+    /** One declared field, as a table's column picker and filter bar need it. */
+    private static Map<String, Object> columnField(
+            aspm.app.inventory.InventoryService.AttributeDefinition d) {
+        Map<String, Object> field = new LinkedHashMap<>();
+        field.put("key", d.key());
+        field.put("label", d.label());
+        field.put("dataType", d.dataType());
+        field.put("permittedValues", d.permittedValues());
+        field.put("filterable", d.filterable());
+        field.put("required", d.required());
+        field.put("purpose", d.purpose());
+        return field;
+    }
+
+    /**
+     * {@code GET /api/ui/hosts?q=}.
+     *
+     * <p>The reverse lookup: a hostname in, every asset it is published on out. This is the query an
+     * incident starts with — an alert, a certificate or a log line names a host and nobody on the
+     * call knows whose it is.
+     */
+    public Dispatcher.Response hosts(Dispatcher.Request request) throws Exception {
+        Principal principal = request.principal();
+        String q = request.query().getOrDefault("q", "");
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (var hit : inventory.hostLookup(principal, q)) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("host", hit.host());
+            entry.put("exposure", hit.exposure());
+            entry.put("assetId", hit.assetId().toString());
+            entry.put("assetName", hit.assetName());
+            entry.put("assetTypeCode", hit.assetTypeCode());
+            // 'UNSPECIFIED' rather than null when the edge records none. A blank cell in this column
+            // reads as production to most people, and being wrong about that during an incident is
+            // the expensive direction.
+            entry.put("environment", hit.environment() == null ? "UNSPECIFIED" : hit.environment());
+            entry.put("owningNodeName", hit.owningNodeName());
+            entry.put("ownerAncestors", hit.ownerAncestors());
+            entry.put("applicationId",
+                    hit.applicationId() == null ? null : hit.applicationId().toString());
+            entry.put("applicationName", hit.applicationName());
+            rows.add(entry);
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("rows", rows);
+        body.put("query", q);
+        // Said out loud rather than truncated quietly. A capped list that does not say it is capped
+        // reads as "that is all of them", which on this query is the answer people act on.
+        body.put("capped", rows.size() >= 200);
+        return json(body);
+    }
+
+
+    /**
+     * {@code GET /api/ui/organization}.
+     *
+     * <h2>Why the tree carries posture and not only names</h2>
+     *
+     * <p>The tree used to draw a name, a type and a count of directly-owned assets. That is enough to
+     * edit the structure and not enough to use it: the question somebody opens this page with is
+     * "which part of the group is the problem", and a list of names answers it for nobody. Each node
+     * therefore arrives with the same figures the overview reports per operating company, rolled up
+     * over that node's own subtree.
+     *
+     * <p><b>These rows do not add up, deliberately.</b> A finding two levels down counts against every
+     * ancestor accountable for it, because that is what accountability means here — summing a column
+     * would multiply it by the depth of the tree. The interface says so rather than leaving a reader
+     * to discover it from arithmetic that does not reconcile.
+     *
+     * <p>{@code assetCount} is unchanged and still means <em>directly owned</em>, because the deprecate
+     * guard turns on it: a node is blocked from deprecation by what sits on it, not by what sits under
+     * it. {@code metrics.applications} is the subtree figure, and the two differ on every node above a
+     * leaf. Both are sent because conflating them would either break the guard or misreport the estate.
+     */
     public Dispatcher.Response organization(Dispatcher.Request request) throws Exception {
         Principal principal = request.principal();
+
+        // Two aggregates per node, from the two services that own them: operational counts from
+        // OverviewInsights, the DOC-28 score from RiskScoring. Composed here rather than joined in
+        // either query — the score and the counts are different models over the same rows, and a
+        // single query returning both would make one of them look derived from the other.
+        Map<String, aspm.app.resource.OverviewInsights.Posture> counts = new LinkedHashMap<>();
+        for (var row : new aspm.app.resource.OverviewInsights(dataSource).nodePosture(principal)) {
+            counts.put(row.nodeId(), row);
+        }
+        aspm.app.resource.RiskScoring scoring = new aspm.app.resource.RiskScoring(dataSource);
+        Map<String, aspm.app.resource.RiskScoring.Posture> scores = new LinkedHashMap<>();
+        for (var row : scoring.nodePosture(principal)) {
+            scores.put(row.id(), row);
+        }
+
+        List<Map<String, Object>> rows = nodes(inventory.nodes(principal, false));
+        for (Map<String, Object> node : rows) {
+            String id = String.valueOf(node.get("id"));
+            var c = counts.get(id);
+            Map<String, Object> metrics = new LinkedHashMap<>();
+            // Absent from the aggregate means no subtree row came back for this node, which after a
+            // successful query means zero of everything — not unknown. Stated rather than left null,
+            // because a null here would render as "not measured" and a node with no applications IS
+            // measured: the answer is that there is nothing to measure (PP-1 cuts both ways).
+            metrics.put("applications", c == null ? 0L : c.applications());
+            metrics.put("neverAssessed", c == null ? 0L : c.neverAssessed());
+            metrics.put("openNow", c == null ? 0L : c.openNow());
+            metrics.put("openBefore", c == null ? 0L : c.openBefore());
+            metrics.put("serious", c == null ? 0L : c.serious());
+            metrics.put("exposedSerious", c == null ? 0L : c.exposedSerious());
+            // Null, never a placeholder date. "Never assessed" is the answer that matters most on
+            // this page and a zero cannot carry it.
+            metrics.put("lastAssessedAt", c == null ? null : c.lastAssessedAt());
+            metrics.put("measured", c != null && c.measured());
+            node.put("metrics", metrics);
+            // Null where the model cannot defend a figure for this subtree. riskPosture already sends
+            // posture and band as null at INSUFFICIENT confidence, and the confidence with them, so
+            // the interface can draw the gap instead of a number.
+            node.put("risk", scores.containsKey(id) ? riskPosture(scores.get(id)) : null);
+        }
+
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("nodes", nodes(inventory.nodes(principal, false)));
+        body.put("nodes", rows);
+        // The header figures, over the whole reachable scope in one pass rather than summed from the
+        // rows above — the rows overlap by construction, and two grants that nest would count the
+        // same application twice. Null where the caller reaches nothing at all.
+        body.put("totals", riskPosture(scoring.overall(principal)));
         body.put("nodeTypes", inventory.nodeTypes(principal).stream()
                 .map(t -> Map.of("id", t.id().toString(), "code", t.code(),
                         "mayOwnAssets", t.mayOwnAssets(), "ordinal", t.ordinal()))

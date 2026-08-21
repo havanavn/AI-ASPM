@@ -1,18 +1,58 @@
 -- The DOC-09 §4 machine as the default definition. Seeded so a tenant EDITS the specified workflow
 -- rather than authoring one — "configurable structure, opinionated defaults" (product principle 3).
+\set ON_ERROR_STOP on
+
+-- WHICH TENANT. Defaults to the demo tenant so every existing flow behaves as before;
+-- seed-bootstrap.sql passes a real one. Workflow states, assessment triggers and declared fields are
+-- TENANT DATA (ADR-027) — a hardcoded id put them in a tenant a real deployment does not serve, and
+-- the symptom is not an error: it is a platform where no transition is defined, no review obligation
+-- exists and no field is offered.
+\if :{?tenant_id}
+\else
+  \set tenant_id '11111111-1111-1111-1111-111111111111'
+\endif
+
+-- psql does NOT substitute :variables inside a dollar-quoted block, so they are carried in as
+-- session settings the block reads at run time. Substituting them textually would also mean a value
+-- containing a quote became SQL, which is the injection this avoids by construction.
+SELECT set_config('aspm.seed_tenant', :'tenant_id', false);
+
 DO $seed$
 DECLARE
-    t         uuid := '11111111-1111-1111-1111-111111111111';
-    asm_type  uuid := 'cccccccc-0000-4000-8000-000000000001';
-    def       uuid := 'eeeeeeee-0000-4000-8000-00000000000e';
+    t         uuid := current_setting('aspm.seed_tenant')::uuid;
+    asm_type  uuid;
+    def       uuid;
     s         record;
     initial   uuid;
 BEGIN
     PERFORM set_config('aspm.current_tenant', t::text, true);
 
-    INSERT INTO workflow_definition (id, tenant_id, assessment_type_id, version, state)
-    VALUES (def, t, asm_type, 1, 'DRAFT')
-    ON CONFLICT (id) DO NOTHING;
+    -- *** THE ASSESSMENT TYPE AND THE DEFINITION WERE BOTH LITERAL UUIDS, AND BOTH WERE WRONG. ***
+    --
+    -- `asm_type` named a row nothing in this repository creates — the demo tenant's PENTEST type was
+    -- put there by hand — so this file failed on a foreign key for every tenant but that one.
+    --
+    -- `def` was a literal primary key with ON CONFLICT (id) DO NOTHING, which is worse than failing:
+    -- run against a SECOND tenant it inserts nothing and reports success, and every state and
+    -- transition below then attaches to the FIRST tenant's definition. Row-level security would have
+    -- refused those writes, so the visible outcome is a tenant with a workflow that has no states —
+    -- a platform where no transition is defined and nothing says why.
+    --
+    -- Both are now resolved per tenant. Found by running the documented seed path on an empty
+    -- database.
+    SELECT id INTO asm_type FROM assessment_type WHERE tenant_id = t ORDER BY code LIMIT 1;
+    IF asm_type IS NULL THEN
+        RAISE EXCEPTION 'this tenant has no assessment_type, so a workflow definition has nothing to '
+            'belong to. Run seed-bootstrap.sql first — it declares one as a default.';
+    END IF;
+
+    SELECT id INTO def FROM workflow_definition
+     WHERE tenant_id = t AND assessment_type_id = asm_type AND version = 1;
+    IF def IS NULL THEN
+        def := uuidv7();
+        INSERT INTO workflow_definition (id, tenant_id, assessment_type_id, version, state)
+        VALUES (def, t, asm_type, 1, 'DRAFT');
+    END IF;
 
     -- States, with the category that decides clock behaviour. WAITING_EXTERNAL states pause the clock,
     -- which DOC-09 §4 requires for RETURNED_FOR_INFO and PENDING_APPROVAL and which PRD-RSK-034 makes

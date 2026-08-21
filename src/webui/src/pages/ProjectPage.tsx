@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Boxes, ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { ArrowLeft, Boxes, ChevronLeft, ChevronRight, Pencil, Plus } from "lucide-react";
 import { api } from "@/lib/api";
+import { AttributeSummary, type AttributeValue, type FieldDefinition } from "@/components/AttributeFields";
 import type { ProjectRow } from "@/pages/ProjectsPage";
 import { ApplicationPosture } from "@/components/ApplicationPosture";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +24,22 @@ interface Detail extends ProjectRow {
   components: Component[];
   requests: { id: string; code: string; state: string; created_at: string }[];
 }
+/**
+ * The record and the catalogue that describes it, from the editor endpoint.
+ *
+ * Read from the same place the form reads, rather than composed a second time onto the detail
+ * response: two compositions of one record is how a detail page comes to disagree with the form that
+ * edits it, and the disagreement always surfaces as "I saved it and it did not change".
+ */
+interface Record_ {
+  technicalContactId: string | null; technicalContactName: string | null;
+  attributes: Record<string, AttributeValue>;
+  /** Hosts by environment code, from the catalogue-driven editor payload (ADR-061). */
+  domains: Record<string, string[]>;
+  repository: string; repositoryBranch: string;
+}
+interface Environment { code: string; label: string; lifecycleState: string }
+interface Editor { project: Record_; fields: FieldDefinition[]; environments: Environment[] }
 
 /**
  * One project.
@@ -35,6 +52,7 @@ interface Detail extends ProjectRow {
 export function ProjectPage() {
   const { id = "" } = useParams();
   const [detail, setDetail] = useState<Detail | null>(null);
+  const [record, setRecord] = useState<Editor | null>(null);
   const [error, setError] = useState<string | null>(null);
   const components = usePaging(detail?.components ?? []);
 
@@ -43,6 +61,12 @@ export function ProjectPage() {
     api.get<Detail>(`/api/ui/projects/${id}`)
       .then((d) => live && setDetail(d))
       .catch((e) => live && setError(e.message));
+    // The record is fetched separately and its failure is NOT fatal to the page. A caller who can
+    // read the project but not its record still gets the posture, the components and the history;
+    // blanking the whole page over one panel would be the larger loss.
+    api.get<Editor>(`/api/ui/projects/${id}/editor`)
+      .then((d) => live && setRecord(d))
+      .catch(() => live && setRecord(null));
     return () => { live = false; };
   }, [id]);
 
@@ -72,6 +96,47 @@ export function ProjectPage() {
         </p>
         {detail.description && <p className="mt-1 max-w-3xl text-sm">{detail.description}</p>}
       </div>
+
+      <Card>
+        <CardHeader className="flex-row items-start justify-between gap-4 space-y-0">
+          <div>
+            <CardTitle>Record</CardTitle>
+            <CardDescription>
+              What this project is, where it runs and what stands in front of it. Every field is shown
+              whether or not it is filled — "no WAF recorded" and "no WAF" are different claims, and
+              hiding the empty ones would make an unfilled inventory look like a complete one.
+            </CardDescription>
+          </div>
+          <Button variant="outline" size="sm" asChild>
+            <Link to={`/projects/${id}/edit`}><Pencil className="size-3" /> Edit</Link>
+          </Button>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-5">
+          {!record ? (
+            <p className="text-xs text-muted-foreground">Loading the record…</p>
+          ) : (
+            <>
+              <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+                <Fact label="Technical contact" value={record.project.technicalContactName} />
+                {/* One fact per environment the tenant declares, in the catalogue's own order.
+                    Two were written here — Production and UAT — which showed nothing for a project
+                    published in any other environment, and nothing at all in a tenant that names
+                    its environments differently (ADR-061). */}
+                {(record.environments ?? []).map((environment) => (
+                  <Fact key={environment.code} label={`${environment.label} domain`}
+                        value={(record.project.domains?.[environment.code] ?? []).join(", ")} />
+                ))}
+                <Fact label="Source repository" value={record.project.repository} />
+                <Fact label="Branch" value={record.project.repositoryBranch} />
+                <Fact label="Exposure" value={detail.exposureDeclared} />
+              </dl>
+              <div className="border-t pt-4">
+                <AttributeSummary fields={record.fields} values={record.project.attributes ?? {}} />
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       {/* The four-tile row that used to sit here is gone. The posture panel below opens with the
           same four figures and eleven more, and two rows of headline numbers — computed by two
@@ -314,6 +379,20 @@ function Field({ label, value }: { label: string; value: string | null }) {
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className="text-sm">{value ?? <span className="text-muted-foreground">—</span>}</div>
 
+    </div>
+  );
+}
+
+/** One recorded value, or the visible absence of one. */
+function Fact({ label, value }: { label: string; value: string | null | undefined }) {
+  return (
+    <div>
+      <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dd className="pt-0.5 text-sm">
+        {value
+          ? <span className="break-all">{value}</span>
+          : <span className="text-xs italic text-tone-unknown">not recorded</span>}
+      </dd>
     </div>
   );
 }

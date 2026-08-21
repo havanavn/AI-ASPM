@@ -170,7 +170,7 @@ export function ApiGuidePage() {
               </SelectContent>
             </Select>
           </div>
-          <PageSize paging={paging} />
+          <PageSize size={paging.size} onChange={paging.setSize} />
         </CardContent>
         <Table>
           <TableHeader>

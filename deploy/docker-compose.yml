@@ -61,7 +61,10 @@ services:
       - postgres-data:/var/lib/postgresql
       - ./postgres/01-login-roles.sh:/docker-entrypoint-initdb.d/01-login-roles.sh:ro
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # Loopback only. The operational store holds every finding, every piece of evidence and the
+      # encrypted test credentials; nothing outside this host has any business reaching 5432, and a
+      # published port is reachable by anything on the network whatever the password is.
+      - "${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
     healthcheck:
       # OPS-DEP-008 keeps readiness and liveness separate. Compose has one probe, so this is
       # readiness: it gates dependent services and does not restart the container.
@@ -71,11 +74,17 @@ services:
       retries: 20
     command:
       - postgres
-      # Logging every statement is a local-development choice and would be wrong in production:
-      # DOC-14 requires audit events, and a statement log is not one — it also captures parameter
-      # values, which for this platform means evidence content and secrets.
+      # STATEMENT LOGGING IS OFF. It was `log_min_duration_statement=500`, and the comment that sat
+      # here said why that is wrong for anything holding real data: a statement log captures
+      # PARAMETER VALUES, which for this platform means evidence content, hostnames, finding text and
+      # — on the credential-custody path — ciphertext and nonces. DOC-14 requires audit events, and
+      # the audit chain provides them; a statement log is not an audit trail, it is a second copy of
+      # the data in a file with none of the trail's controls over it.
+      #
+      # Slow queries are still findable without it: pg_stat_statements normalises parameters out.
+      # Turn it on for a bounded diagnostic session against non-production data, never as a default.
       - -c
-      - log_min_duration_statement=500
+      - log_min_duration_statement=-1
 
   # -------------------------------------------------------------------------------------------
   # Applies V001 to V013 in order, then exits. This is the migration pipeline of DOC-15 section
@@ -137,7 +146,18 @@ services:
       # SEC-TEN-004 forbids a tenant derived from a header. DevPrincipalResolver REFUSES to
       # construct unless ASPM_ENVIRONMENT is exactly 'development', so this pair cannot be lifted
       # into a production deployment by copying the file — the server fails to start instead.
-      ASPM_ENVIRONMENT: "development"
+      # ⚠ THIS FLAG IS LOAD-BEARING TWICE, so it is required rather than defaulted.
+      #
+      #   1. DevPrincipalResolver REFUSES to construct unless this is exactly 'development'. That
+      #      resolver takes identity from a header or from an UNSIGNED cookie, so anything other than
+      #      'development' is what stops one variable from becoming full impersonation.
+      #   2. AspmApplication sets `secureCookies = !development`. So a deployment holding real data
+      #      marks its session cookie Secure — which means SIGN-IN REQUIRES HTTPS. That is the
+      #      intended coupling: a deployment that has not got a TLS ingress in front of it cannot log
+      #      anybody in, rather than logging them in over cleartext.
+      #
+      # For local interface work set it back to 'development' in .env, knowingly.
+      ASPM_ENVIRONMENT: ${ASPM_ENVIRONMENT:?set it in .env — 'production' unless you are doing local interface work, see .env.example}
       ASPM_TENANT_ID: "11111111-1111-1111-1111-111111111111"
       # Test-credential custody (V033). Absent means the platform REFUSES a password rather
       # than storing one in the clear — see CredentialCustody. Generate: openssl rand -base64 32
@@ -150,7 +170,15 @@ services:
       # flow is the only way in. Set ASPM_DEV_AUTH=true to restore header identity for API testing.
       ASPM_DEV_AUTH: "${ASPM_DEV_AUTH:-false}"
     ports:
-      - "${APP_PORT:-8080}:8080"
+      # BOUND TO THE LOOPBACK INTERFACE, not to every address. `- "8080:8080"` binds 0.0.0.0, which
+      # publishes this tier to every network the host is on — measured on this host: the app, the
+      # operational store and the object store were all reachable from the LAN. This tier serves plain
+      # HTTP and expects a TLS-terminating ingress in front of it (ADR-057, OPS-DEP-017), so the only
+      # thing that should reach the container port is that ingress, on this host.
+      #
+      # Set APP_BIND to an interface the ingress can reach if it runs elsewhere. Do not set it to
+      # 0.0.0.0 to "make it work" — that is the finding, not the fix.
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-8080}:8080"
     healthcheck:
       # Readiness, not liveness. OPS-DEP-008 keeps them separate and compose has one probe, so the
       # one it gets is the one that must fail when the operational store is unreachable.
@@ -222,8 +250,12 @@ services:
     volumes:
       - objectstore-data:/data
     ports:
-      - "${OBJECTSTORE_PORT:-9000}:9000"
-      - "${OBJECTSTORE_CONSOLE_PORT:-9001}:9001"
+      # Loopback only, both of them. The buckets refuse anonymous access, but the CONSOLE on 9001 is a
+      # sign-in page for the store that holds the evidence archive, and its credentials are in the
+      # same .env as everything else. A login page nobody outside this host can reach is one nobody
+      # outside this host can attack.
+      - "${OBJECTSTORE_BIND:-127.0.0.1}:${OBJECTSTORE_PORT:-9000}:9000"
+      - "${OBJECTSTORE_BIND:-127.0.0.1}:${OBJECTSTORE_CONSOLE_PORT:-9001}:9001"
     healthcheck:
       test: ["CMD-SHELL", "mc ready local || exit 1"]
       interval: 5s

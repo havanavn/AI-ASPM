@@ -306,6 +306,42 @@ class OperationManifestTest {
                         List.of("PRD-VUL-001", "PRD-WRK-032", "SEC-AUZ-017");
                 case "/api/ui/projects", "/api/ui/projects/{id}" ->
                         List.of("PRD-AST-001", "PRD-AST-005", "SEC-AUZ-016");
+                // The project record editor. PRD-AST-014 is the tenant-defined custom attributes it
+                // reads the catalogue for and writes values into — including the validation that
+                // requirement asks for, which is why the check is at the write and not only in the
+                // dropdown. PRD-AST-016 is the technical contact, distinct from the OrgNode owner, and
+                // this is the operation that finally records one. PRD-AST-004 covers the typed
+                // relationships the domains and the repository are written as, rather than as text on
+                // the project. SEC-AUZ-017 is the re-read of the project before writing through its
+                // identifier.
+                // The declared-field catalogue itself. PRD-AST-014 is tenant-defined custom
+                // attributes per asset type — this is the surface that defines them, where the
+                // project editor is the surface that fills them in. PRD-TEN-004 keeps that
+                // configuration isolated per tenant. PRD-AUZ-006 is deny-by-default, which is what a
+                // tenant with nobody holding cfg.asset.field.manage has to mean: nobody edits the
+                // catalogue, rather than everybody.
+                // The host reverse lookup. PRD-AST-002 is the domain asset type it searches;
+                // PRD-AST-004 the published-on relationship that makes a host findable from the asset
+                // it serves; SEC-AUZ-016 the scope, which is composed from the attached asset because
+                // a domain has no owner of its own.
+                case "/api/ui/hosts" ->
+                        List.of("PRD-AST-002", "PRD-AST-004", "SEC-AUZ-016");
+                case "/api/ui/settings/fields", "/api/ui/settings/fields/{id}",
+                     "/api/ui/settings/fields/{id}/lifecycle",
+                     "/api/ui/settings/fields/{id}/move" ->
+                        List.of("PRD-AST-014", "PRD-TEN-004", "PRD-AUZ-006");
+                // The endpoint environment catalogue. CFG-AST-002 is the requirement that the
+                // environment an endpoint is published in is tenant vocabulary rather than an
+                // enumeration in code — the defect it closes was two hardcoded pairs in two editors.
+                // PRD-AST-004 is the published-on relationship the vocabulary labels; PRD-TEN-004
+                // keeps the configuration isolated per tenant; PRD-AUZ-006 is deny-by-default, which
+                // is what a tenant with nobody holding cfg.asset.field.manage has to mean.
+                case "/api/ui/settings/environments", "/api/ui/settings/environments/{id}",
+                     "/api/ui/settings/environments/{id}/lifecycle",
+                     "/api/ui/settings/environments/{id}/move" ->
+                        List.of("CFG-AST-002", "PRD-AST-004", "PRD-TEN-004", "PRD-AUZ-006");
+                case "/api/ui/projects/{id}/editor" ->
+                        List.of("PRD-AST-004", "PRD-AST-014", "PRD-AST-016", "SEC-AUZ-017");
                 case "/api/ui/organization" ->
                         List.of("PRD-ORG-001", "SEC-AUZ-010", "SEC-AUZ-016");
                 // The write side of the React interface. Each traces to the SAME requirements as the

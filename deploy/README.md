@@ -283,8 +283,24 @@ topology, and a guide that omitted them would be claiming one.
 `principal_session.step_up_at` arrive with it, and `/ui/users` answers 500 without them.
 
 ```bash
-docker compose run --rm migrate          # re-applies V001..V018; every file is guarded, so this is safe
+docker compose run --rm migrate          # re-applies every migration; each file is guarded, so this is safe
 docker compose up -d --build app
+```
+
+**Two settings decide whether this deployment is safe to put real data in**, and both are in `.env`:
+
+| Setting | For a demo estate | For real data |
+|---|---|---|
+| `ASPM_ENVIRONMENT` | `development` — the interface works over plain HTTP, and `ASPM_DEV_AUTH=true` becomes available | anything else. Session cookies become `Secure`, so **sign-in requires HTTPS** and a TLS-terminating ingress in front of `127.0.0.1:${APP_PORT}` is mandatory. `DevPrincipalResolver` refuses to start |
+| published ports | loopback is still correct | loopback, with only the ingress reaching the app. `APP_BIND`, `POSTGRES_BIND` and `OBJECTSTORE_BIND` exist for an ingress on another host; never set them to `0.0.0.0` |
+
+`ASPM_DEV_AUTH` takes identity from a request header, or from an **unsigned** base64 cookie carrying
+tenant, principal, permissions and scope. Anyone who can reach the port is anyone they choose to be.
+It is absent from `.env` deliberately — export it for the one command that needs it rather than
+leaving it set:
+
+```bash
+ASPM_DEV_AUTH=true docker compose up -d app
 ```
 
 The application inventory additionally needs a **seed**, because the `APPLICATION` asset type is
@@ -294,18 +310,66 @@ tenant data (ADR-009) and a migration must not create it:
 PORT=$(grep '^POSTGRES_PORT=' .env | cut -d= -f2)
 PASS=$(grep '^MIGRATE_PASSWORD=' .env | cut -d= -f2)
 for f in seed-tenant.sql seed-applications.sql seed-composition.sql seed-findings-link.sql \
-         seed-cadence.sql; do
+         seed-cadence.sql seed-project-attributes.sql; do
     PGPASSWORD=$PASS psql -h 127.0.0.1 -p ${PORT:-5432} -U aspm_migrate -d aspm -f $f
 done
 ```
 
+### A tenant for real data — not this list
+
+Everything in the block above seeds the **demonstration estate**. Do not run it against a tenant that
+will hold a company's own findings: `seed-demo.sql` alone writes seventy assets, seven hundred
+findings and two hundred assessment requests describing a company that does not exist, and every
+count, score and coverage figure the platform reports would then be part fiction — the failure product
+principle 1 exists to prevent.
+
+`seed-bootstrap.sql` is the other path: structure and vocabulary, nothing that claims a fact about an
+estate. Read its header, then:
+
+```bash
+PORT=$(grep '^POSTGRES_PORT=' .env | cut -d= -f2)
+PASS=$(grep '^MIGRATE_PASSWORD=' .env | cut -d= -f2)
+TENANT=$(uuidgen)                       # and put it in .env as ASPM_TENANT_ID
+psql() { PGPASSWORD=$PASS command psql -h 127.0.0.1 -p ${PORT:-5432} -U aspm_migrate -d aspm \
+         -v ON_ERROR_STOP=1 -v tenant_id="$TENANT" "$@"; }
+
+psql -v demo_people=off -f seed-identity.sql          # THE PERMISSION CATALOGUE IS IN HERE
+psql -v tenant_name='Your Group' -v residency=VN \
+     -v admin_user=secadmin -v admin_email=sec@your.example \
+     -v admin_name='Security Administrator' -f seed-bootstrap.sql
+psql -f seed-workflow.sql
+psql -f seed-cadence.sql
+psql -f seed-project-attributes.sql                   # opinionated defaults; read them first
+```
+
+`-v demo_people=off` is not cosmetic: `CredentialBootstrap` gives `ASPM_BOOTSTRAP_PASSWORD` to every
+principal with no credential, so the three example accounts in `seed-identity.sql` are accounts that
+can **sign in**, holding real scope over real assets.
+
+**Four defects in the first-run path were found by running exactly the above against an empty
+database**, and each had been invisible because the demo estate was seeded once, by hand, before any
+of them mattered:
+
+| What was wrong | What it looked like |
+|---|---|
+| `seed-cadence.sql` used `SET LOCAL` outside a transaction | Discarded with a warning, so the file established no tenant context and the review policy failed to read `criticality_tier`. The inserts before it carry their tenant explicitly, so the file looked applied |
+| Nothing creates an `assessment_type` | Every fresh tenant failed on `fk_workflow_definition__assessment_type_id__tenant`. The demo tenant's PENTEST row is referenced by `seed-workflow.sql` as a literal and inserted by no file |
+| `seed-workflow.sql` used a literal `workflow_definition` primary key with `ON CONFLICT (id) DO NOTHING` | Run against a second tenant it inserts nothing and reports success. The states and transitions then target the first tenant's definition, row-level security refuses them, and the result is a tenant whose workflow has no states and nothing saying why |
+| `seed-identity.sql`, `seed-workflow.sql`, `seed-cadence.sql` and `seed-project-attributes.sql` hardcoded the demo tenant id | Roles, workflow, review policy and declared fields all landed in a tenant the deployment does not serve. Not an error — a platform where no transition is defined and no field is offered |
+
+Verified end to end on 2026-08-21: migrations, the five seeds above, then the application tier booted
+against that database — ready `200`, interface `200`, API `401` without a session, and the credential
+bootstrap touching one account rather than four.
+
 | Seed | What it does |
 |---|---|
+| `seed-bootstrap.sql` | **The only seed for a tenant that will hold real data.** Tenant row, three organization node types and one root node, criticality tiers, severity scale, six asset types, endpoint environments, one assessment type, password policy, an ADMIN role and one administrator you name. No asset, no finding, no request |
 | `seed-applications.sql` | The `APPLICATION` asset type, three applications, and **repairs three defects in the demo organization data** — colliding ordinals, a duplicate node type, and only the deepest level being allowed to own assets |
 | `seed-composition.sql` | The `FEATURE` asset type, the **declared security attributes** (authentication, data handled, tech stack, runtime, compliance scope, third-party, deployment model), and the features that sit between an application and its services |
 | `seed-findings-link.sql` | Links the demo findings to the assets they were found in, and adds closed and risk-accepted ones so the counts mean something |
 | `seed-tenant.sql` | **Run first.** The tenant registration row. Everything worked without it — row-level security keys off a session variable and never consults the registry — but every migration backfill written as `FOR t IN SELECT id FROM tenant` iterated zero times, changed nothing, and reported success. Two of them did |
 | `seed-cadence.sql` | The assessment triggers (change review, pre-go-live, periodic full review, ad hoc), the per-criticality review interval, and which terminal states count as completing a review |
+| `seed-project-attributes.sql` | The **declared field catalogue for `PROJECT`** — who uses it, tech stack, how it is reached, architecture link, API count, sign-in controls, CDN, WAF, abuse controls. Tenant data, so another deployment declares a different set without a code change (ADR-027). Domains, the repository, the branch, criticality and the technical contact are deliberately **not** here: each is already first-class, and a second copy would give two answers to one question |
 
 ### Rebuild the app image after any Java or bundle change
 

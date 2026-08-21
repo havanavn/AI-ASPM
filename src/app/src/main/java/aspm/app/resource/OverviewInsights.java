@@ -312,6 +312,39 @@ public final class OverviewInsights {
      * reading an accountable manager would accept.
      */
     public List<Posture> posture(Principal principal) throws SQLException {
+        return posture(principal,
+                "WITH roots AS (SELECT id, name FROM org_node WHERE id = ANY (?)), ");
+    }
+
+    /**
+     * The same posture, for <b>every node the caller can reach</b> rather than for their scope roots.
+     *
+     * <p>{@link #posture} answers "how is my company doing". This answers "how is each part of it
+     * doing", which is the question the organization tree is opened to ask: a division with four
+     * hundred open findings and a division with none look identical in a tree that draws only names.
+     *
+     * <p>Every row still aggregates its own whole subtree, so the figures on a parent are not the sum
+     * of the rows drawn beneath it — a finding two levels down is counted once against each ancestor
+     * that is accountable for it. That is the only reading that survives being shown to the person
+     * who owns the parent, and it is why these rows must not be added together.
+     *
+     * <p>A node the caller cannot reach contributes nothing here, and a node they can reach reports
+     * its full subtree — including descendants outside their scope. That is deliberate and it is the
+     * existing rule: {@code org_closure} descent from a granted node is what a scope grant means.
+     */
+    public List<Posture> nodePosture(Principal principal) throws SQLException {
+        return posture(principal,
+                "WITH roots AS (SELECT id, name FROM org_node "
+                        + "                 WHERE id IN (SELECT descendant_id FROM org_closure "
+                        + "                               WHERE ancestor_id = ANY (?))), ");
+    }
+
+    /**
+     * @param roots the {@code WITH roots AS (…),} clause, binding exactly one scope array. The rest
+     *     of the statement is shared: the two callers differ only in which nodes get a row, never in
+     *     what a row means, and a second copy of this aggregation would drift from the first
+     */
+    private List<Posture> posture(Principal principal, String roots) throws SQLException {
         Set<UUID> scope = principal == null ? Set.of() : principal.scopeNodeIds();
         if (scope.isEmpty()) {
             return List.of();
@@ -319,7 +352,7 @@ public final class OverviewInsights {
         List<Posture> rows = new ArrayList<>();
         try (Connection connection = open(principal);
                 PreparedStatement statement = connection.prepareStatement(
-                        "WITH roots AS (SELECT id, name FROM org_node WHERE id = ANY (?)), "
+                        roots
                                 + "     sub AS (SELECT r.id AS root_id, r.name, c.descendant_id "
                                 + "               FROM roots r "
                                 + "               JOIN org_closure c ON c.ancestor_id = r.id) "

@@ -320,7 +320,30 @@ class ApplicationTierTest {
             // documents arrived as JSON (+2); and /guide and /api-guide joined the enumerated interface
             // routes, each of which registers a shell operation of its own (+2). Four moving parts for
             // one page, which is why the number is asserted rather than described.
-            assertEquals(193, registry.all().size(), "registered: " + registry.all().size());
+            //
+            // 195: the project record editor, read and write. Two operations for one screen because the
+            // read composes the tenant's declared field catalogue and the write validates against it,
+            // and they are authorized differently — A_SCOPED_READ on ast.asset.read, B_SCOPED_WRITE on
+            // ast.asset.update.
+            //
+            // 196: /projects/{id}/edit joined WebUi.ROUTES, and every enumerated interface route
+            // registers a class-G shell operation of its own. Three moving parts for one screen —
+            // the read, the write, and the shell that serves it.
+            //
+            // 201: the declared-field catalogue — one read and four writes. Four writes rather than
+            // one because declaring, amending, retiring and reordering are authorized as separate
+            // operations, and a tenant that wants somebody able to reorder but not retire needs them
+            // separable to do it.
+            //
+            // 203: the host reverse lookup — the read, plus the shell for the page that serves it.
+            // Domains were assets nothing could search: no name filter on any list reached one,
+            // because a host is on the far end of an edge rather than in a column.
+            //
+            // 208: the endpoint environment catalogue — one read and four writes, the same five
+            // shapes as the field catalogue because it is the same kind of tenant vocabulary. No SPA
+            // page of its own: it is a section of the existing settings screen, so there is no sixth
+            // class-G shell operation here.
+            assertEquals(208, registry.all().size(), "registered: " + registry.all().size());
         }
 
         @Test

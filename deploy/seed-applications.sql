@@ -168,12 +168,90 @@ BEGIN
     -- finding raised against that host attaches to the host, and the application detail page reaches
     -- it by traversal.
     -- -------------------------------------------------------------------------------------------
+    -- -------------------------------------------------------------------------------------------
+    -- The two pre-production hosts.
+    --
+    -- HERE RATHER THAN BESIDE THE OTHER DOMAIN ASSETS IN seed-demo.sql, and the reason is worth
+    -- recording: that file is one DO block and no longer replays — it writes an assessment request in
+    -- state DRAFT, which the workflow trigger added later rejects because states are tenant data and
+    -- this tenant's workflow does not define one by that name. So anything added there cannot be
+    -- applied to an existing deployment at all, and the edges below would silently skip on their
+    -- IS NOT NULL guard, which reads as "the seed ran and the estate has no UAT host".
+    --
+    -- The scope columns are copied from a host that already carries them rather than re-derived, so
+    -- this cannot disagree with the row it sits beside about which node owns the branch.
+    -- -------------------------------------------------------------------------------------------
+    INSERT INTO asset (tenant_id, type_id, identity_key, identity_rule_version, display_name,
+                       owning_node_id, criticality_mode, criticality_tier_id, exposure_declared,
+                       exposure_declared_by, exposure_declared_at, exposure_observed,
+                       exposure_observed_source, exposure_observed_at, lifecycle_state, tags,
+                       technical_contact_id, discovery_source, discovery_method, first_seen_at,
+                       last_confirmed_at, scope_node_id, scope_ancestor_path, scope_node_type_id,
+                       scope_criticality_id, scope_hierarchy_ver, scope_resolved_at)
+    SELECT t, src.type_id, v.host, 1, v.host,
+           src.owning_node_id, src.criticality_mode, src.criticality_tier_id, 'INTERNAL_ONLY',
+           src.exposure_declared_by, now() - interval '20 days', v.observed,
+           'external-scan', now(), 'ACTIVE', ARRAY['pre-production'],
+           src.technical_contact_id, v.source, v.method, now() - interval '60 days',
+           now(), src.scope_node_id, src.scope_ancestor_path, src.scope_node_type_id,
+           src.scope_criticality_id, src.scope_hierarchy_ver, now()
+      FROM asset src
+      CROSS JOIN (VALUES
+        -- Acceptance testing. Genuinely reachable only from inside, which is the case a reader
+        -- should not confuse with the next one.
+        ('uat.payments.example.internal', 'INTERNAL_ONLY',  'MANUAL',    'ONBOARDING'),
+        -- Release verification, declared internal and OBSERVED internet-facing. This is why a
+        -- pre-production column is worth having: it is the finding the inventory exists to surface,
+        -- and until ADR-061 it was unrecordable on an application and invisible in every column.
+        -- The conflict flag is computed by a trigger, so it is not passed here.
+        ('stg.payments.example.internal', 'INTERNET_PUBLIC', 'CONNECTOR', 'DNS_ENUMERATION')
+      ) AS v(host, observed, source, method)
+     WHERE src.tenant_id = t AND src.display_name = 'pay.example.com'
+       AND NOT EXISTS (SELECT 1 FROM asset a
+                        WHERE a.tenant_id = t AND a.identity_key = v.host);
+
+    -- -------------------------------------------------------------------------------------------
+    -- The endpoint environment catalogue. Tenant vocabulary, not code (ADR-061, CFG-AST-002).
+    --
+    -- HERE RATHER THAN IN THE MIGRATION ALONE. V069 backfills every EXISTING tenant, and this
+    -- tenant does not exist when the migrations run — the same trap seed-tenant.sql documents, where
+    -- `FOR t IN SELECT id FROM tenant` iterates zero times and reports success. A tenant with no
+    -- rows here gets no domain input on either inventory editor and no domain column on either list,
+    -- which is correct behaviour for "declared nothing" and a poor way to arrive out of the box.
+    --
+    -- Three rows, and they are DEFAULTS rather than product vocabulary (PP-3): they reproduce the
+    -- two lists that used to be compiled into the two editors. Rename, reorder or retire them at
+    -- Configuration -> Asset fields; nothing in code reads a code below by name.
+    -- -------------------------------------------------------------------------------------------
+    INSERT INTO asset_endpoint_environment (tenant_id, code, label_i18n, purpose, ordinal)
+    VALUES (t, 'PRODUCTION', '{"en":"Production","vi":"Production"}'::jsonb,
+            'The host real users reach. A finding here is exploitable by whoever can reach the host, '
+            'which for an internet-facing application is everybody.', 10),
+           (t, 'UAT', '{"en":"UAT","vi":"UAT"}'::jsonb,
+            'The host acceptance testing runs against. Routinely holds a copy of production data '
+            'behind weaker controls — no WAF, default credentials, debug endpoints left enabled — so '
+            'it is frequently the cheapest route to the same records.', 20),
+           (t, 'STAGING', '{"en":"Staging","vi":"Staging"}'::jsonb,
+            'The host a release is verified on before production. Usually reachable by more people '
+            'than production and watched by fewer.', 30)
+    ON CONFLICT (tenant_id, code) DO NOTHING;
+
     INSERT INTO asset_relationship (tenant_id, from_asset_id, to_asset_id, edge_type,
                                     discovery_source, attributes, valid_from)
     SELECT t, e.from_id, e.to_id, e.edge, 'MANUAL', e.attrs::jsonb, now()
       FROM (VALUES
         (app_api,    (SELECT id FROM asset WHERE tenant_id = t AND display_name = 'pay.example.com'),
          'PUBLISHED_ON', '{"environment":"PRODUCTION"}'),
+        -- Pre-production, on the same application. Until ADR-061 these two edges were unwritable from
+        -- any form: the application editor named PRODUCTION and STAGING, the project editor named
+        -- PRODUCTION and UAT, and the domain columns were derived from recorded data alone — so an
+        -- environment with no write path never became a column and never appeared anywhere.
+        (app_api,    (SELECT id FROM asset WHERE tenant_id = t
+                       AND display_name = 'uat.payments.example.internal'),
+         'PUBLISHED_ON', '{"environment":"UAT"}'),
+        (app_api,    (SELECT id FROM asset WHERE tenant_id = t
+                       AND display_name = 'stg.payments.example.internal'),
+         'PUBLISHED_ON', '{"environment":"STAGING"}'),
         (app_api,    (SELECT id FROM asset WHERE tenant_id = t AND display_name = 'group/payments-api'),
          'BUILDS',       '{}'),
         (app_api,    (SELECT id FROM asset WHERE tenant_id = t AND display_name = 'payments-authorization'),

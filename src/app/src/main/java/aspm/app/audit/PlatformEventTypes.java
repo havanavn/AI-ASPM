@@ -34,6 +34,15 @@ public final class PlatformEventTypes {
      */
     private static final Set<String> AGGREGATES = Set.of(
             "asset",
+            // The declared-field catalogue. A separate aggregate from `asset` on purpose: deprecating
+            // a field changes what every asset of a type shows without touching one asset row, so an
+            // administrator reading the asset's own history would see nothing at all.
+            "asset_attribute_definition",
+            // The endpoint environment catalogue (ADR-061). Its own aggregate for the same reason as
+            // the field catalogue above it: retiring an environment removes a domain input from every
+            // editor and a column from every inventory list without touching one asset row, so the
+            // change is invisible in the history of anything it affects.
+            "asset_endpoint_environment",
             "asset_type",
             "org_node",
             "org_node_type",

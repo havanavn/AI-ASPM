@@ -14,6 +14,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CadenceCell, ScoreCell, type Cadence } from "@/components/inventory";
 import { Pager, usePaging } from "@/components/Paging";
+import { AttributeCell, AttributeFilters, ColumnPicker, useDeclaredColumns, type CellValue } from "@/components/DeclaredColumns";
+import type { FieldDefinition } from "@/components/AttributeFields";
 
 const ANY = "__any__";
 
@@ -24,6 +26,15 @@ export interface AppRow {
   criticalityCode: string | null; criticalityInherited: boolean; userBase: string;
   riskValue: number | null; riskBand: string | null; riskCoverage: string | null;
   findingCount: number; requestCount: number; projectCount: number; cadence: Cadence | null;
+  /**
+   * The fold of this application's projects' declared fields.
+   *
+   * **Absent, not empty, where it has no project.** Nothing recorded because there is nothing to
+   * record is a different answer from nothing recorded because nobody has, and the cell says which.
+   * `__projects` carries how many projects went into the fold, because a set of three values means
+   * something different over four projects than over forty.
+   */
+  projectAttributes: (Record<string, CellValue> & { __projects?: number }) | null;
 }
 interface Payload {
   rows: AppRow[];
@@ -38,6 +49,14 @@ interface Payload {
   reviewCounts: { exact: Record<string, number>; atLeast: Record<string, number> };
   /** The highest exact number offered. Larger counts are reached with "at least" ticked. */
   reviewChoices: number;
+  /**
+   * The PROJECT fields that can be folded onto an application — selects, booleans and counts.
+   *
+   * Free text is deliberately absent: four descriptions concatenated is a cell nobody reads and a
+   * filter that matches by accident. The server decides this, not the client, so the rule lives in
+   * one place.
+   */
+  projectFields: FieldDefinition[];
 }
 
 export function ApplicationsPage() {
@@ -50,6 +69,7 @@ export function ApplicationsPage() {
   // Before the early returns below: a hook that runs conditionally is a hook that runs in a
   // different order on the next render, which React reports as a different bug entirely.
   const paging = usePaging(data?.rows ?? []);
+  const columns = useDeclaredColumns("aspm.columns.applications", data?.projectFields ?? []);
 
   useEffect(() => {
     let live = true;
@@ -187,6 +207,11 @@ export function ApplicationsPage() {
               </Label>
             </div>
           </div>
+          {/* The PROJECT fields, filtered here as "has a project where…". An application has no
+              value of its own for these — it has whatever its projects have. */}
+          <AttributeFilters fields={data.projectFields} params={params} onChange={setParam} />
+          <ColumnPicker fields={data.projectFields} chosen={columns.chosen} label="Project fields"
+                        onToggle={columns.toggle} onMove={columns.move} onClear={columns.clear} />
           {params.toString() !== "" && (
             <Button variant="ghost" size="sm"
                     onClick={() => { setQ(""); setParams(new URLSearchParams(), { replace: true }); }}>
@@ -202,6 +227,7 @@ export function ApplicationsPage() {
             No application matches these filters.
           </CardContent>
         ) : (
+          <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -216,6 +242,16 @@ export function ApplicationsPage() {
                 <TableHead className="text-right">Requests</TableHead>
                 <TableHead>Full reviews</TableHead>
                 <TableHead>Lifecycle</TableHead>
+                {/* Marked as rolled up. A reader who takes these for the application's own values
+                    would read one project's missing WAF as the whole application's. */}
+                {columns.columns.map((f) => (
+                  <TableHead key={f.key}>
+                    {f.label}
+                    <span className="block text-[10px] font-normal normal-case text-muted-foreground">
+                      across its projects
+                    </span>
+                  </TableHead>
+                ))}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -266,10 +302,23 @@ export function ApplicationsPage() {
                   <TableCell className="tabular text-right">{row.requestCount}</TableCell>
                   <TableCell><CadenceCell cadence={row.cadence} /></TableCell>
                   <TableCell><Badge tone={row.lifecycleState === "ACTIVE" ? "ok" : "neutral"}>{row.lifecycleState}</Badge></TableCell>
+                  {columns.columns.map((f) => (
+                    <TableCell key={f.key}>
+                      {row.projectAttributes === null || row.projectAttributes === undefined ? (
+                        // No project at all. Distinct from a project that recorded nothing: there is
+                        // nothing here that COULD carry the value, and "not recorded" would imply
+                        // somebody forgot rather than that the estate is empty underneath.
+                        <span className="text-[11px] italic text-muted-foreground">no projects</span>
+                      ) : (
+                        <AttributeCell field={f} value={row.projectAttributes[f.key]} />
+                      )}
+                    </TableCell>
+                  ))}
                 </TableRow>
               ))}
             </TableBody>
           </Table>
+          </div>
         )}
         <Pager paging={paging} unit="applications" />
       </Card>

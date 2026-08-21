@@ -219,11 +219,13 @@ export function Suggestions({ subject, defaultKind }: {
               <Badge tone={BAND[row.confidenceBand] ?? "neutral"}>
                 {row.confidenceBand?.toLowerCase()} confidence
               </Badge>
-              {FRESHNESS[row.freshness] && (
-                <Badge tone={FRESHNESS[row.freshness].tone} title={FRESHNESS[row.freshness].title}>
-                  {FRESHNESS[row.freshness].label}
-                </Badge>
-              )}
+              {(() => {
+                // Looked up once. Indexing three times told the compiler nothing about the first
+                // check, and an unrecognised freshness value is a real case — the server may name one
+                // this build has never heard of.
+                const f = FRESHNESS[row.freshness];
+                return f && <Badge tone={f.tone} title={f.title}>{f.label}</Badge>;
+              })()}
             </div>
             <p className="text-xs text-muted-foreground">
               <span className="font-medium text-foreground">{row.subjectLabel}</span> — {row.detail}

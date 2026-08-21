@@ -11,6 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { AttributeCell, AttributeFilters, ColumnPicker, useDeclaredColumns, type CellValue } from "@/components/DeclaredColumns";
+import type { FieldDefinition } from "@/components/AttributeFields";
 
 const ANY = "__any__";
 
@@ -22,6 +24,9 @@ export interface ProjectRow {
   criticalityCode: string | null; criticalityInherited: boolean;
   exposureDeclared: string | null; exposureObserved: string | null; exposureConflict: boolean;
   applicationId: string | null; applicationName: string | null;
+  /** The tenant's declared field values, typed. Rendered as whichever columns the reader chose. */
+  attributes: Record<string, CellValue>;
+  technicalContactName: string | null;
   componentCount: number; findingTotal: number; findingOpen: number; findingAccepted: number;
   criticalOpen: number; highOpen: number; scaOpen: number; requestCount: number;
   lastDetectedAt: string | null;
@@ -36,6 +41,8 @@ interface Payload {
   /** Every node with a project beneath it, at every level. The filter is subtree-inclusive. */
   organizations: OrgOption[];
   totals: { projects: number; teams: number; withSevereOpen: number; neverAssessed: number };
+  /** Every field declared on PROJECT — what the column picker may offer and the filters may build. */
+  fields: FieldDefinition[];
 }
 
 /**
@@ -46,7 +53,7 @@ interface Payload {
  * project owned directly by a root node has no ancestor above it and is not therefore unowned.
  */
 function organizationOf(p: ProjectRow): string | null {
-  return p.ownerAncestors.length > 0 ? p.ownerAncestors[0] : p.owningNodeName;
+  return p.ownerAncestors[0] ?? p.owningNodeName;
 }
 
 /**
@@ -64,6 +71,9 @@ export function ProjectsPage() {
   const [q, setQ] = useState(params.get("q") ?? "");
   const query = useMemo(() => params.toString(), [params]);
   const paging = usePaging(data?.rows ?? []);
+  // Keyed per table. The same field means the same thing on both pages, but a reader wants different
+  // columns when looking at projects than when looking at applications.
+  const columns = useDeclaredColumns("aspm.columns.projects", data?.fields ?? []);
 
   useEffect(() => {
     let live = true;
@@ -149,6 +159,11 @@ export function ProjectsPage() {
               </SelectContent>
             </Select>
           </div>
+          {/* One filter per declared field the catalogue marks filterable. Adding a field in
+              settings makes its filter appear here — there is no list of them in this file. */}
+          <AttributeFilters fields={data.fields} params={params} onChange={setParam} />
+          <ColumnPicker fields={data.fields} chosen={columns.chosen}
+                        onToggle={columns.toggle} onMove={columns.move} onClear={columns.clear} />
           {filtered && (
             <Button variant="ghost" size="sm"
                     onClick={() => { setQ(""); setParams(new URLSearchParams(), { replace: true }); }}>
@@ -159,6 +174,8 @@ export function ProjectsPage() {
       </Card>
 
       <Card className="overflow-hidden">
+        {/* Wide once a few declared columns are on. The table scrolls inside its own card rather than
+            the page scrolling sideways, which would take the filters off screen with it. */}
         {data.rows.length === 0 ? (
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
             {filtered
@@ -166,6 +183,7 @@ export function ProjectsPage() {
               : "No project has been registered yet. A project is an asset of type PROJECT contained by an application."}
           </CardContent>
         ) : (
+          <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -178,6 +196,7 @@ export function ProjectsPage() {
                 <TableHead className="text-right">Parts</TableHead>
                 <TableHead className="text-right">Findings</TableHead>
                 <TableHead className="text-right">Requests</TableHead>
+                {columns.columns.map((f) => <TableHead key={f.key}>{f.label}</TableHead>)}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -252,10 +271,16 @@ export function ProjectsPage() {
                             className="ml-2 text-primary hover:underline">request</Link>
                     )}
                   </TableCell>
+                  {columns.columns.map((f) => (
+                    <TableCell key={f.key}>
+                      <AttributeCell field={f} value={p.attributes?.[f.key]} />
+                    </TableCell>
+                  ))}
                 </TableRow>
               ))}
             </TableBody>
           </Table>
+          </div>
         )}
         <Pager paging={paging} unit="projects" />
       </Card>

@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { Building2, Loader2, Pencil, Plus, X } from "lucide-react";
+import { Link } from "react-router-dom";
+import {
+  Building2, ChevronDown, ChevronRight, Loader2, Minus, Pencil, Plus, TrendingDown, TrendingUp, X,
+} from "lucide-react";
 import { api, ApiError } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,17 +13,41 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Combobox } from "@/components/Combobox";
+import { Kpi } from "@/components/Kpi";
 import { Pager, usePaging } from "@/components/Paging";
+import { RiskCell, type RiskPosture } from "@/components/Risk";
+import { ScoreCell } from "@/components/inventory";
+import type { AppRow } from "@/pages/ApplicationsPage";
 
+/**
+ * What is true of the whole subtree beneath a node, not of the node itself.
+ *
+ * `applications` therefore differs from the node's own `assetCount`, which counts only what is owned
+ * directly and is what the deprecation guard turns on. Both are carried because conflating them
+ * would either weaken the guard or understate the estate.
+ */
+interface Metrics {
+  applications: number; neverAssessed: number;
+  openNow: number; openBefore: number;
+  serious: number; exposedSerious: number;
+  lastAssessedAt: string | null; measured: boolean;
+}
 interface Node {
   id: string; name: string; typeCode: string; depth: number;
   parentName: string | null; parentId: string | null; mayOwnAssets: boolean;
   criticalityCode: string | null; assetCount: number; childCount: number;
   lifecycleState: string; rowVersion: number;
+  metrics: Metrics;
+  /** Null where the model produced no row for this subtree. Not the same as a score of zero. */
+  risk: RiskPosture | null;
 }
 interface NodeType { id: string; code: string; mayOwnAssets: boolean; ordinal: number }
 interface Tier { id: string; code: string; ordinal: number }
-interface Payload { nodes: Node[]; nodeTypes: NodeType[]; criticalities: Tier[] }
+interface Payload {
+  nodes: Node[]; nodeTypes: NodeType[]; criticalities: Tier[];
+  /** One figure over everything the caller reaches, computed in one pass rather than summed here. */
+  totals: RiskPosture;
+}
 
 const NONE = "__none__";
 const ROOT = "__root__";
@@ -40,6 +68,7 @@ export function OrganizationPage() {
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const paging = usePaging(data?.nodes ?? []);
@@ -58,6 +87,9 @@ export function OrganizationPage() {
 
   if (!data) return <div className="text-sm text-muted-foreground">{error ?? "Loading…"}</div>;
 
+  const totals = data.totals;
+  const unmeasured = totals?.scoped ? totals.assets - totals.measuredAssets : 0;
+
   return (
     <div className="flex flex-col gap-5">
       <div className="flex items-start justify-between gap-4">
@@ -72,6 +104,23 @@ export function OrganizationPage() {
           {creating ? <><X className="size-3" /> Cancel</> : <><Plus className="size-3" /> Add a node</>}
         </Button>
       </div>
+
+      {/* Over the whole reachable scope, from the server in one pass. NOT summed from the rows below,
+          which overlap: every figure on a node covers its entire subtree, so adding a column up would
+          count a finding once per level of the tree above it. */}
+      {totals?.scoped && (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Kpi label="Nodes" value={data.nodes.length}
+               hint="Everything you can reach, at every level" />
+          <Kpi label="Applications" value={totals.assets} />
+          <Kpi label="Never assessed" value={unmeasured} tone="critical"
+               hint="No assessment has ever covered these, so they contribute no findings" />
+          <Kpi label="Open findings" value={totals.findings} tone="info"
+               hint={totals.posture === null
+                 ? "Group risk withheld — not enough of the estate is measured"
+                 : `Group risk ${totals.posture} · ${totals.band?.toLowerCase()}`} />
+        </div>
+      )}
 
       {notice && (
         <Card><CardContent className="flex items-center justify-between gap-4 text-sm">
@@ -90,18 +139,25 @@ export function OrganizationPage() {
           <CardTitle className="flex items-center gap-2"><Building2 className="size-4" /> Nodes</CardTitle>
           <CardDescription>
             Node types and depth are tenant configuration — nothing here is named in code (ADR-027).
+            Open a node to see the applications beneath it. Every figure covers that node's whole
+            subtree, so a finding counts against each level accountable for it and the columns are not
+            meant to add up.
           </CardDescription>
         </CardHeader>
         {data.nodes.length === 0 ? (
           <CardContent className="text-sm text-muted-foreground">No node is configured yet.</CardContent>
         ) : (
+          <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Node</TableHead><TableHead>Type</TableHead><TableHead>Parent</TableHead>
+                <TableHead>Node</TableHead><TableHead>Parent</TableHead>
                 <TableHead>Criticality</TableHead>
+                <TableHead className="text-right">Risk</TableHead>
+                <TableHead className="text-right">Open</TableHead>
+                <TableHead className="text-right">Serious &amp; exposed</TableHead>
                 <TableHead className="text-right">Applications</TableHead>
-                <TableHead className="text-right">Children</TableHead>
+                <TableHead>Last assessed</TableHead>
                 <TableHead>Lifecycle</TableHead>
                 <TableHead />
               </TableRow>
@@ -110,50 +166,243 @@ export function OrganizationPage() {
               {paging.rows.map((n) => (
                 editing === n.id ? (
                   <TableRow key={n.id}>
-                    <TableCell colSpan={8} className="bg-muted/30 p-0">
+                    <TableCell colSpan={10} className="bg-muted/30 p-0">
                       <EditNode node={n} tiers={data.criticalities}
                                 onSaved={() => done(`Saved ${n.name}.`)}
                                 onCancel={() => setEditing(null)} />
                     </TableCell>
                   </TableRow>
                 ) : (
-                  <TableRow key={n.id}>
-                    <TableCell>
-                      <span style={{ paddingInlineStart: `${n.depth * 1.1}rem` }} className="text-sm font-medium">
-                        {n.name}
-                      </span>
-                      {!n.mayOwnAssets && (
-                        <div className="text-[11px] text-muted-foreground"
-                             style={{ paddingInlineStart: `${n.depth * 1.1}rem` }}>
-                          cannot own applications
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell><Badge>{n.typeCode}</Badge></TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{n.parentName ?? "—"}</TableCell>
-                    <TableCell>
-                      {n.criticalityCode ? <Badge tone="high">{n.criticalityCode}</Badge>
-                                         : <Badge tone="unknown">none</Badge>}
-                    </TableCell>
-                    <TableCell className="tabular text-right">{n.assetCount}</TableCell>
-                    <TableCell className="tabular text-right">{n.childCount}</TableCell>
-                    <TableCell>
-                      <Badge tone={n.lifecycleState === "ACTIVE" ? "ok" : "neutral"}>{n.lifecycleState}</Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button size="sm" variant="ghost"
-                              onClick={() => { setEditing(n.id); setCreating(false); setNotice(null); }}>
-                        <Pencil className="size-3" /> Edit
-                      </Button>
-                    </TableCell>
-                  </TableRow>
+                  <NodeRow key={n.id} node={n} open={expanded === n.id}
+                           onToggle={() => setExpanded(expanded === n.id ? null : n.id)}
+                           onEdit={() => { setEditing(n.id); setCreating(false); setNotice(null); }} />
                 )
               ))}
             </TableBody>
           </Table>
+          </div>
         )}
         <Pager paging={paging} unit="nodes" />
       </Card>
+    </div>
+  );
+}
+
+/**
+ * One node, and — when it is open — the applications beneath it.
+ *
+ * **Why the drill-down is here rather than only a link to the inventory.** The tree is where somebody
+ * decides which part of the group to look at; making them leave it, filter, and come back to compare
+ * against the sibling turns one question into three navigations. The link to the full inventory is
+ * kept beside the list, because everything the inventory offers — search, the review filters, sorting
+ * — belongs there and not duplicated here.
+ */
+function NodeRow({ node, open, onToggle, onEdit }: {
+  node: Node; open: boolean; onToggle: () => void; onEdit: () => void;
+}) {
+  const m = node.metrics;
+  const delta = m.openNow - m.openBefore;
+  const Chevron = open ? ChevronDown : ChevronRight;
+
+  return (
+    <>
+      <TableRow>
+        <TableCell>
+          <div className="flex items-center gap-1"
+               style={{ paddingInlineStart: `${node.depth * 1.1}rem` }}>
+            {/* The whole name is the control. A disclosure triangle alone is a target most people
+                miss, and the count in the Applications column is the other way in. */}
+            <button type="button" onClick={onToggle}
+                    className="flex items-center gap-1 text-sm font-medium hover:underline">
+              <Chevron className="size-3.5 shrink-0 text-muted-foreground" />
+              {node.name}
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[11px] text-muted-foreground"
+               style={{ paddingInlineStart: `${node.depth * 1.1 + 1.15}rem` }}>
+            <Badge>{node.typeCode}</Badge>
+            {node.childCount > 0 && <span>{node.childCount} below</span>}
+            {!node.mayOwnAssets && <span>cannot own applications</span>}
+          </div>
+        </TableCell>
+        <TableCell className="text-xs text-muted-foreground">{node.parentName ?? "—"}</TableCell>
+        <TableCell>
+          {node.criticalityCode ? <Badge tone="high">{node.criticalityCode}</Badge>
+                                : <Badge tone="unknown">none</Badge>}
+        </TableCell>
+        <TableCell className="text-right"><RiskCell row={node.risk} /></TableCell>
+        <TableCell className="text-right">
+          <span className="tabular text-xs">{m.openNow}</span>
+          {/* Direction beside the count, the same way the overview reports it. A number alone cannot
+              say whether the unit is gaining or losing ground, which is the question its manager is
+              actually asked. */}
+          <span className={cn("ml-1.5 inline-flex items-center gap-0.5 text-[11px]",
+                              delta > 0 ? "text-sev-critical"
+                              : delta < 0 ? "text-tone-ok" : "text-muted-foreground")}
+                title={`${m.openBefore} open ninety days ago · ${m.serious} of the ${m.openNow} open now are serious`}>
+            {delta > 0 ? <TrendingUp className="size-3" />
+              : delta < 0 ? <TrendingDown className="size-3" />
+              : <Minus className="size-3" />}
+            {delta !== 0 && Math.abs(delta)}
+          </span>
+        </TableCell>
+        <TableCell className="text-right">
+          {m.exposedSerious > 0
+            ? <Badge tone="critical">{m.exposedSerious}</Badge>
+            : <span className="tabular text-xs text-muted-foreground">0</span>}
+        </TableCell>
+        <TableCell className="text-right">
+          {m.applications === 0 ? (
+            <span className="tabular text-xs text-muted-foreground">0</span>
+          ) : (
+            <Link to={`/applications?node=${node.id}`} className="tabular text-xs text-primary hover:underline">
+              {m.applications}
+            </Link>
+          )}
+          {/* The count that changes how every other figure on this row should be read: an application
+              nobody has assessed contributes no findings, so it makes the row look quieter than the
+              node is. */}
+          {m.neverAssessed > 0 && (
+            <div className="pt-0.5"><Badge tone="critical">{m.neverAssessed} never assessed</Badge></div>
+          )}
+        </TableCell>
+        <TableCell className="font-mono text-[11px]">
+          {/* Never is a fact, and a worse one than a stale date. */}
+          {m.lastAssessedAt ?? <span className="italic text-tone-unknown">never</span>}
+        </TableCell>
+        <TableCell>
+          <Badge tone={node.lifecycleState === "ACTIVE" ? "ok" : "neutral"}>{node.lifecycleState}</Badge>
+        </TableCell>
+        <TableCell className="text-right">
+          <Button size="sm" variant="ghost" onClick={onEdit}><Pencil className="size-3" /> Edit</Button>
+        </TableCell>
+      </TableRow>
+      {open && (
+        <TableRow>
+          <TableCell colSpan={10} className="bg-muted/30 p-0">
+            <NodeApplications node={node} />
+          </TableCell>
+        </TableRow>
+      )}
+    </>
+  );
+}
+
+/** How many applications the inline list draws before deferring to the inventory. */
+const INLINE_LIMIT = 25;
+
+/**
+ * The applications beneath one node, fetched when the node is opened.
+ *
+ * Fetched on open rather than with the tree: a group with two hundred nodes would otherwise pay for
+ * two hundred lists to show one. The server applies the same subtree rule the counts use — the node
+ * and everything under it — so the number in the row and the length of this list agree.
+ */
+function NodeApplications({ node }: { node: Node }) {
+  const [rows, setRows] = useState<AppRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    setRows(null);
+    setError(null);
+    api.get<{ rows: AppRow[] }>(`/api/ui/applications?node=${encodeURIComponent(node.id)}`)
+      .then((d) => live && setRows(d.rows))
+      .catch((e) => live && setError(e.message));
+    return () => { live = false; };
+  }, [node.id]);
+
+  if (error) return <div className="px-5 py-4 text-sm text-destructive">{error}</div>;
+  if (!rows) {
+    return (
+      <div className="flex items-center gap-2 px-5 py-4 text-xs text-muted-foreground">
+        <Loader2 className="size-3 animate-spin" /> Loading applications…
+      </div>
+    );
+  }
+  if (rows.length === 0) {
+    return (
+      <div className="px-5 py-4 text-xs text-muted-foreground">
+        {/* Two different facts, and the tree must not blur them. A node that cannot own applications
+            is configured that way; one that can and owns none is an accountability gap. */}
+        {node.mayOwnAssets
+          ? `No application is recorded under ${node.name}. Nothing beneath it is being measured.`
+          : `${node.typeCode} nodes cannot own applications. Look at the nodes beneath this one.`}
+      </div>
+    );
+  }
+
+  const shown = rows.slice(0, INLINE_LIMIT);
+  return (
+    <div className="flex flex-col gap-2 px-5 py-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="text-xs font-medium">
+          {rows.length} application{rows.length === 1 ? "" : "s"} under {node.name}
+          <span className="pl-1.5 font-normal text-muted-foreground">
+            including every node beneath it
+          </span>
+        </span>
+        <Link to={`/applications?node=${node.id}`} className="text-xs text-primary hover:underline">
+          Open in the inventory
+        </Link>
+      </div>
+      <div className="overflow-x-auto rounded-md border bg-card">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Application</TableHead>
+              <TableHead>Owner</TableHead>
+              <TableHead>Criticality</TableHead>
+              <TableHead>Exposure</TableHead>
+              <TableHead className="text-right">Risk</TableHead>
+              <TableHead className="text-right">Findings</TableHead>
+              <TableHead>Lifecycle</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {shown.map((a) => (
+              <TableRow key={a.id}>
+                <TableCell>
+                  <Link to={`/applications/${a.id}`} className="text-xs font-medium text-primary hover:underline">
+                    {a.name}
+                  </Link>
+                </TableCell>
+                <TableCell className="text-xs text-muted-foreground">
+                  {/* The owning node, not this one. Opening a division and seeing the division's name
+                      on every row would hide which team actually holds each application. */}
+                  {a.owningNodeName ?? <span className="italic">unowned</span>}
+                </TableCell>
+                <TableCell>
+                  {a.criticalityCode
+                    ? <Badge tone="high">{a.criticalityCode}{a.criticalityInherited ? " (inherited)" : ""}</Badge>
+                    : <Badge tone="unknown">none</Badge>}
+                </TableCell>
+                <TableCell className="text-xs text-muted-foreground">
+                  {a.exposureDeclared ?? "—"}
+                  {a.exposureConflict && <Badge tone="warn">observed differs</Badge>}
+                </TableCell>
+                <TableCell className="text-right">
+                  <ScoreCell value={a.riskValue} band={a.riskBand} coverage={a.riskCoverage} />
+                </TableCell>
+                <TableCell className="tabular text-right text-xs">{a.findingCount}</TableCell>
+                <TableCell>
+                  <Badge tone={a.lifecycleState === "ACTIVE" ? "ok" : "neutral"}>{a.lifecycleState}</Badge>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      {/* Said out loud rather than truncated quietly. A list that stops at twenty-five without saying
+          so reads as "that is all of them", which is the one thing it must not mean here. */}
+      {rows.length > shown.length && (
+        <p className="text-[11px] text-muted-foreground">
+          Showing the first {shown.length} of {rows.length}.{" "}
+          <Link to={`/applications?node=${node.id}`} className="text-primary hover:underline">
+            See all {rows.length} in the inventory
+          </Link>, where they can be searched, sorted and filtered.
+        </p>
+      )}
     </div>
   );
 }
@@ -336,7 +585,10 @@ function EditNode({ node, tiers, onSaved, onCancel }: {
                 <span className="text-[11px] text-muted-foreground">
                   {node.childCount > 0 && `${node.childCount} child node(s)`}
                   {node.childCount > 0 && node.assetCount > 0 && " and "}
-                  {node.assetCount > 0 && `${node.assetCount} application(s)`} still sit here.
+                  {/* "asset", not "application". The guard counts everything owned directly — a
+                      repository or an artifact blocks deprecation exactly as an application does, and
+                      naming only one of them sends somebody looking for the wrong thing to move. */}
+                  {node.assetCount > 0 && `${node.assetCount} directly-owned asset(s)`} still sit here.
                 </span>
               )}
               <Button size="sm" variant="outline" disabled={busy || blocked}

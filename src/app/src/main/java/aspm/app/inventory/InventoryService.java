@@ -118,7 +118,7 @@ public final class InventoryService {
 
     /** A related asset: a domain, a repository, a service. */
     public record Related(UUID id, String name, String typeCode, String edgeType,
-            String environment, String exposure, String lifecycleState) {
+            String environment, String exposure, String lifecycleState, String branch) {
     }
 
     /** An organization node, for the picker and the organization editor. */
@@ -231,8 +231,26 @@ public final class InventoryService {
         }
 
         if (search != null && !search.isBlank()) {
-            sql.append(" AND (display_name ILIKE ? OR identity_key ILIKE ?)");
+            // Name, identity key, OR a hostname published on this application or on anything beneath
+            // it. The composition join is what makes "which application is this subdomain part of"
+            // answerable from the box people already type into: the host is almost always attached to
+            // a project or a service, not to the application itself.
+            sql.append(" AND (display_name ILIKE ? OR identity_key ILIKE ?"
+                    // The application's OWN edges as well as its parts'. asset_composition holds no
+                    // self row, so the first clause is not redundant — without it, a host attached
+                    // directly to the application is unfindable, which is where the first host any
+                    // deployment records ends up.
+                    + "  OR EXISTS (SELECT 1 FROM asset_relationship dr "
+                    + "               JOIN asset d ON d.id = dr.to_asset_id "
+                    + "               JOIN asset_type dt ON dt.id = d.type_id AND dt.code = 'DOMAIN' "
+                    + "              WHERE dr.valid_until IS NULL "
+                    + "                AND (dr.from_asset_id = application_inventory.id "
+                    + "                     OR dr.from_asset_id IN "
+                    + "                        (SELECT c.asset_id FROM asset_composition c "
+                    + "                          WHERE c.root_id = application_inventory.id)) "
+                    + "                AND d.display_name ILIKE ?))");
             String pattern = "%" + search.strip() + "%";
+            parameters.add(pattern);
             parameters.add(pattern);
             parameters.add(pattern);
         }
@@ -288,7 +306,10 @@ public final class InventoryService {
                 PreparedStatement statement = connection.prepareStatement(
                         "SELECT b.id, b.display_name, t.code, r.edge_type, "
                                 + "       r.attributes ->> 'environment', b.exposure_declared, "
-                                + "       b.lifecycle_state "
+                                // The branch lives on the EDGE, not on the repository. One repository
+                                // builds several projects from several branches, and putting it on the
+                                // repository asset would make the last writer's branch everybody's.
+                                + "       b.lifecycle_state, r.attributes ->> 'branch' "
                                 + "  FROM asset_relationship r "
                                 + "  JOIN asset b ON b.id = r.to_asset_id "
                                 + "  JOIN asset_type t ON t.id = b.type_id "
@@ -299,7 +320,7 @@ public final class InventoryService {
                 while (results.next()) {
                     rows.add(new Related(results.getObject(1, UUID.class), results.getString(2),
                             results.getString(3), results.getString(4), results.getString(5),
-                            results.getString(6), results.getString(7)));
+                            results.getString(6), results.getString(7), results.getString(8)));
                 }
             }
         }
@@ -351,10 +372,18 @@ public final class InventoryService {
 
     // ----------------------------------------------------------------------------------------------
 
-    /** What the editor submits. Every field optional except the name and the owning node. */
+    /**
+     * What the editor submits. Every field optional except the name and the owning node.
+     *
+     * @param domains the hosts this application is published on, keyed by environment code. An
+     *     environment PRESENT with an empty list clears that environment's endpoints; an environment
+     *     ABSENT from the map is left untouched. The distinction is what lets a form render only the
+     *     environments the tenant currently declares without silently retiring the endpoints of one
+     *     that was deprecated while still holding a host.
+     */
     public record ApplicationDraft(UUID id, String name, UUID owningNodeId, UUID criticalityTierId,
             String exposureDeclared, String description, String userBase, String features,
-            String tags, String productionDomain, String stagingDomain, String repository,
+            String tags, Map<String, List<String>> domains, String repository,
             Integer rowVersion) {
     }
 
@@ -398,8 +427,13 @@ public final class InventoryService {
                 // Endpoints and repository. Each is create-or-reuse: two applications published on the
                 // same host must be two edges to ONE domain asset, not two domain assets with the same
                 // name — that is the duplicate the identity key exists to prevent.
-                linkEndpoint(connection, principal, id, draft.productionDomain(), "PRODUCTION");
-                linkEndpoint(connection, principal, id, draft.stagingDomain(), "STAGING");
+                //
+                // Driven by the submitted map rather than by a pair of named environments. The two
+                // that used to be named here — PRODUCTION and STAGING — were half of the reason an
+                // application could not record a UAT host at all: the column offering is derived from
+                // recorded data, so an environment with no write path never became a column. See
+                // V069.
+                linkEndpoints(connection, principal, id, draft.domains());
                 linkRepository(connection, principal, id, draft.repository());
 
                 // One event for the aggregate, whichever half of the save ran. The asset table is the
@@ -745,31 +779,115 @@ public final class InventoryService {
         }
     }
 
-    /** Attaches a domain for one environment, replacing whatever was attached for it before. */
-    private void linkEndpoint(Connection connection, Principal principal, UUID applicationId,
-            String host, String environment) throws SQLException {
-        // The previous edge for this environment is CLOSED, not deleted. INV-AST-16 rejects reopening
-        // an edge and there is no DELETE grant: "what was deployed when this finding was open" has to
-        // stay answerable, so moving an application to a new host leaves the old edge with an end date.
-        try (PreparedStatement close = connection.prepareStatement(
-                "UPDATE asset_relationship SET valid_until = now(), updated_at = now(), updated_by = ? "
-                        + " WHERE from_asset_id = ? AND edge_type = ? AND valid_until IS NULL "
-                        + "   AND attributes ->> 'environment' = ?")) {
-            close.setObject(1, principal == null ? null : principal.principalId());
-            close.setObject(2, applicationId);
-            close.setString(3, EDGE_PUBLISHED_ON);
-            close.setString(4, environment);
-            close.executeUpdate();
-        }
-        if (blankToNull(host) == null) {
+    /**
+     * Publishes an asset on the hosts it is submitted with, one environment at a time.
+     *
+     * <p><b>Only the environments present in the map are touched.</b> An environment the caller did
+     * not send keeps whatever it has. This is what allows a form to render the environments the
+     * tenant currently declares (V069) without retiring the endpoints of one that was deprecated
+     * while a host was still recorded against it — a form that submitted the whole world implicitly
+     * would delete data it never showed.
+     *
+     * @param domains hosts by environment code. An environment mapped to an empty list has its
+     *     endpoints closed; that is how the interface clears one.
+     */
+    private void linkEndpoints(Connection connection, Principal principal, UUID assetId,
+            Map<String, List<String>> domains) throws SQLException {
+        if (domains == null) {
             return;
         }
-        UUID domainId = findOrCreateAsset(connection, principal, "DOMAIN", host.strip());
-        insertEdge(connection, principal, applicationId, domainId, EDGE_PUBLISHED_ON, environment);
+        for (Map.Entry<String, List<String>> entry : domains.entrySet()) {
+            linkEndpoint(connection, principal, assetId, entry.getKey(), entry.getValue());
+        }
+    }
+
+    /**
+     * The hosts one asset is published on in one environment, reconciled against what is there.
+     *
+     * <p><b>*** AN UNCHANGED HOST IS NO LONGER CLOSED AND RE-OPENED, AND THAT IS A CORRECTION. ***
+     * </b> This method used to close every current edge for the environment and insert one, on every
+     * save. Saving a project without touching its domain therefore ended the edge and started an
+     * identical one, so {@code valid_from} recorded the last time somebody pressed Save rather than
+     * when the application was published there — and "what was deployed when this finding was open"
+     * answered with the edit history of a form. The edges to keep are now left alone.
+     *
+     * <p>What is closed rather than deleted stays closed: INV-AST-16 rejects reopening an edge and
+     * there is no DELETE grant, so moving a host away leaves the old edge with an end date.
+     */
+    private void linkEndpoint(Connection connection, Principal principal, UUID assetId,
+            String environment, List<String> hosts) throws SQLException {
+        if (blankToNull(environment) == null) {
+            return;
+        }
+        // Trimmed, de-duplicated, blanks dropped. Two spellings of one host in one form field would
+        // otherwise become two edges to two DOMAIN assets, which is the duplicate the identity key
+        // exists to prevent.
+        java.util.LinkedHashSet<String> wanted = new java.util.LinkedHashSet<>();
+        if (hosts != null) {
+            for (String host : hosts) {
+                if (blankToNull(host) != null) {
+                    wanted.add(host.strip());
+                }
+            }
+        }
+        // What is already published here, by host name. The identity key rather than the display name
+        // decides sameness, for the same reason the asset lookup uses it: `PAY.example.com` and
+        // `pay.example.com` are one host.
+        Map<String, UUID> current = new LinkedHashMap<>();
+        try (PreparedStatement existing = connection.prepareStatement(
+                "SELECT r.id, d.identity_key FROM asset_relationship r "
+                        + "  JOIN asset d ON d.id = r.to_asset_id "
+                        + "  JOIN asset_type dt ON dt.id = d.type_id AND dt.code = 'DOMAIN' "
+                        + " WHERE r.from_asset_id = ? AND r.edge_type = ? AND r.valid_until IS NULL "
+                        // coalesced, not compared directly: an edge written with no environment at
+                        // all reads as UNSPECIFIED everywhere else — the columns, the filters and the
+                        // form all use that substitute. Comparing the raw attribute would fail to
+                        // match such an edge, so the form would leave it open AND insert a second
+                        // edge to the same host, which is the duplicate the identity key exists to
+                        // prevent.
+                        + "   AND coalesce(r.attributes ->> 'environment', 'UNSPECIFIED') = ?")) {
+            existing.setObject(1, assetId);
+            existing.setString(2, EDGE_PUBLISHED_ON);
+            existing.setString(3, environment);
+            try (ResultSet r = existing.executeQuery()) {
+                while (r.next()) {
+                    current.put(r.getString(2), r.getObject(1, UUID.class));
+                }
+            }
+        }
+        java.util.Set<String> keep = new java.util.LinkedHashSet<>();
+        for (String host : wanted) {
+            keep.add(identityKey(host));
+        }
+        for (Map.Entry<String, UUID> edge : current.entrySet()) {
+            if (keep.contains(edge.getKey())) {
+                continue;
+            }
+            try (PreparedStatement close = connection.prepareStatement(
+                    "UPDATE asset_relationship SET valid_until = now(), updated_at = now(), "
+                            + "updated_by = ? WHERE id = ? AND valid_until IS NULL")) {
+                close.setObject(1, principal == null ? null : principal.principalId());
+                close.setObject(2, edge.getValue());
+                close.executeUpdate();
+            }
+        }
+        for (String host : wanted) {
+            if (current.containsKey(identityKey(host))) {
+                continue;
+            }
+            UUID domainId = findOrCreateAsset(connection, principal, "DOMAIN", host);
+            insertEdge(connection, principal, assetId, domainId, EDGE_PUBLISHED_ON, environment);
+        }
     }
 
     private void linkRepository(Connection connection, Principal principal, UUID applicationId,
             String repository) throws SQLException {
+        linkRepository(connection, principal, applicationId, repository, null);
+    }
+
+    /** The same, recording which branch this asset is built from. */
+    private void linkRepository(Connection connection, Principal principal, UUID applicationId,
+            String repository, String branch) throws SQLException {
         try (PreparedStatement close = connection.prepareStatement(
                 "UPDATE asset_relationship SET valid_until = now(), updated_at = now(), updated_by = ? "
                         + " WHERE from_asset_id = ? AND edge_type = ? AND valid_until IS NULL")) {
@@ -784,7 +902,8 @@ public final class InventoryService {
         // A REFERENCE to a repository, never a clone. ADR-024: the platform never fetches, clones or
         // persists source code and stores no Git credentials. This is a name in an inventory.
         UUID repoId = findOrCreateAsset(connection, principal, "REPOSITORY", repository.strip());
-        insertEdge(connection, principal, applicationId, repoId, EDGE_BUILDS, null);
+        insertEdgeWithAttributes(connection, principal, applicationId, repoId, EDGE_BUILDS,
+                Map.of("branch", branch == null ? "" : branch));
     }
 
     private UUID findOrCreateAsset(Connection connection, Principal principal, String typeCode,
@@ -822,6 +941,21 @@ public final class InventoryService {
 
     private static void insertEdge(Connection connection, Principal principal, UUID from, UUID to,
             String edgeType, String environment) throws SQLException {
+        insertEdgeWithAttributes(connection, principal, from, to, edgeType,
+                environment == null ? Map.of() : Map.of("environment", environment));
+    }
+
+    /**
+     * The same edge, with whatever the relationship itself carries.
+     *
+     * <p>Environment and branch are properties of the EDGE and not of either end: the same host serves
+     * two projects in different environments, and the same repository builds two projects from
+     * different branches. Recording either on the far asset would make the last save win for everybody
+     * pointing at it.
+     */
+    private static void insertEdgeWithAttributes(Connection connection, Principal principal,
+            UUID from, UUID to, String edgeType, Map<String, String> edgeAttributes)
+            throws SQLException {
         try (PreparedStatement insert = connection.prepareStatement(
                 "INSERT INTO asset_relationship (tenant_id, from_asset_id, to_asset_id, edge_type, "
                         + "discovery_source, attributes, valid_from, created_by, updated_by) "
@@ -829,8 +963,13 @@ public final class InventoryService {
             insert.setObject(1, from);
             insert.setObject(2, to);
             insert.setString(3, edgeType);
-            insert.setString(4, environment == null
-                    ? "{}" : aspm.app.runtime.Json.write(Map.of("environment", environment)));
+            Map<String, String> present = new LinkedHashMap<>();
+            for (Map.Entry<String, String> entry : edgeAttributes.entrySet()) {
+                if (blankToNull(entry.getValue()) != null) {
+                    present.put(entry.getKey(), entry.getValue().strip());
+                }
+            }
+            insert.setString(4, present.isEmpty() ? "{}" : aspm.app.runtime.Json.write(present));
             insert.setObject(5, principal == null ? null : principal.principalId());
             insert.setObject(6, principal == null ? null : principal.principalId());
             insert.executeUpdate();
@@ -999,10 +1138,22 @@ public final class InventoryService {
     /** A tenant-declared attribute on an asset type. */
     public record AttributeDefinition(UUID id, String key, String label, String dataType,
             List<String> permittedValues, boolean filterable, boolean required, String purpose,
-            int ordinal) {
+            int ordinal, String lifecycleState, int rowVersion, String labelVi) {
+
+        /** The active-only shape the forms read. Deprecated fields never reach them. */
+        public AttributeDefinition(UUID id, String key, String label, String dataType,
+                List<String> permittedValues, boolean filterable, boolean required, String purpose,
+                int ordinal) {
+            this(id, key, label, dataType, permittedValues, filterable, required, purpose, ordinal,
+                    "ACTIVE", 1, "");
+        }
 
         public boolean isSelect() {
             return "SINGLE_SELECT".equals(dataType) || "MULTI_SELECT".equals(dataType);
+        }
+
+        public boolean active() {
+            return "ACTIVE".equals(lifecycleState);
         }
     }
 
@@ -1233,6 +1384,1112 @@ public final class InventoryService {
             }
         }
         return document;
+    }
+
+    // ==============================================================================================
+    // Reverse lookup: what is this hostname?
+    // ==============================================================================================
+
+    /**
+     * One host, and one thing it is attached to.
+     *
+     * @param environment the environment recorded on the EDGE, so the same host serving production
+     *     for one project and UAT for another reports both truthfully
+     * @param applicationName the application above the attached asset, where there is one. A project
+     *     is the useful answer to "whose is this"; the application is the useful answer to "what is
+     *     it part of", and somebody looking a host up in an incident needs both
+     */
+    public record HostAttachment(UUID domainId, String host, String exposure, UUID assetId,
+            String assetName, String assetTypeCode, String environment, String owningNodeName,
+            List<String> ownerAncestors, UUID applicationId, String applicationName) {
+    }
+
+    /**
+     * Which assets a hostname is published on.
+     *
+     * <h2>Why this exists as its own query</h2>
+     *
+     * <p>"An alert names {@code uat-pay.example.vn} — whose is it, and what is it part of" is the
+     * first question of every incident that starts outside this platform, and until now the answer
+     * was unobtainable: domains are assets joined by an edge, so no name search on the project or
+     * application list could reach one, and no page listed them at all. An inventory that cannot be
+     * queried by the identifier the outside world uses is an inventory nobody consults during the
+     * hour it matters.
+     *
+     * <h2>Substring, deliberately</h2>
+     *
+     * <p>Matched with {@code ILIKE '%q%'} rather than on equality. Somebody pastes a URL, a
+     * certificate subject or a log line; requiring the exact stored form would answer "no" to a host
+     * that is recorded, which is the worst possible answer to this question. Searching
+     * {@code example.vn} therefore returns every subdomain recorded under it, which is the other
+     * half of what people use this for.
+     *
+     * <p><b>Scope comes from the ATTACHED asset, never from the domain.</b> A domain has no owning
+     * node — it is shared by construction, which is the whole reason it is an asset rather than a
+     * string. So the predicate is applied to the thing it is attached to, and a caller sees a host
+     * only through an asset they could already reach. A host attached to two applications in two
+     * branches shows one row to each reader, and neither learns the other exists.
+     */
+    public List<HostAttachment> hostLookup(Principal principal, String query) throws SQLException {
+        Set<UUID> scope = principal == null ? Set.of() : principal.scopeNodeIds();
+        if (scope.isEmpty() || query == null || query.strip().isEmpty()) {
+            return List.of();
+        }
+        List<HostAttachment> rows = new ArrayList<>();
+        try (Connection connection = open(principal);
+                PreparedStatement statement = connection.prepareStatement(
+                        "SELECT d.id, d.display_name, d.exposure_declared, "
+                                + "       a.id, a.display_name, at.code, "
+                                + "       r.attributes ->> 'environment', n.name, "
+                                + "       (SELECT array_agg(an.name ORDER BY cl.depth DESC) "
+                                + "          FROM org_closure cl "
+                                + "          JOIN org_node an ON an.id = cl.ancestor_id "
+                                + "         WHERE cl.descendant_id = a.owning_node_id "
+                                + "           AND cl.depth > 0), "
+                                + "       app.id, app.display_name "
+                                + "  FROM asset d "
+                                + "  JOIN asset_type dt ON dt.id = d.type_id AND dt.code = 'DOMAIN' "
+                                + "  JOIN asset_relationship r ON r.to_asset_id = d.id "
+                                + "                          AND r.valid_until IS NULL "
+                                + "  JOIN asset a ON a.id = r.from_asset_id "
+                                + "  JOIN asset_type at ON at.id = a.type_id "
+                                + "  LEFT JOIN org_node n ON n.id = a.owning_node_id "
+                                // The application above whatever the host is attached to. Absent when
+                                // the host is attached to the application itself, which is why the
+                                // interface falls back to the asset's own name rather than to a blank.
+                                + "  LEFT JOIN LATERAL (SELECT ra.id, ra.display_name "
+                                + "                       FROM asset_composition c "
+                                + "                       JOIN asset ra ON ra.id = c.root_id "
+                                + "                       JOIN asset_type rt ON rt.id = ra.type_id "
+                                + "                                         AND rt.code = 'APPLICATION' "
+                                + "                      WHERE c.asset_id = a.id AND c.depth > 0 "
+                                + "                      ORDER BY c.depth LIMIT 1) app ON true "
+                                + " WHERE d.display_name ILIKE ? "
+                                + "   AND a.lifecycle_state <> 'RETIRED' "
+                                + "   AND a.owning_node_id IN (SELECT descendant_id FROM org_closure "
+                                + "                             WHERE ancestor_id = ANY (?)) "
+                                + " ORDER BY d.display_name, at.ordinal, a.display_name "
+                                + " LIMIT 200")) {
+            statement.setString(1, "%" + query.strip() + "%");
+            statement.setArray(2, connection.createArrayOf("uuid", scope.toArray(new UUID[0])));
+            try (ResultSet r = statement.executeQuery()) {
+                while (r.next()) {
+                    java.sql.Array ancestors = r.getArray(9);
+                    rows.add(new HostAttachment(r.getObject(1, UUID.class), r.getString(2),
+                            r.getString(3), r.getObject(4, UUID.class), r.getString(5),
+                            r.getString(6), r.getString(7), r.getString(8),
+                            ancestors == null ? List.of() : List.of((String[]) ancestors.getArray()),
+                            r.getObject(10, UUID.class), r.getString(11)));
+                }
+            }
+        }
+        return List.copyOf(rows);
+    }
+
+    /**
+     * Every host attached to each of these assets, and to the projects beneath them.
+     *
+     * <p>Keyed by the asset asked about. Used to put a domain column on a list without a query per
+     * row: the inventory tables are the place somebody notices a host they did not expect, and they
+     * cannot notice it if seeing it costs a page load each.
+     *
+     * @param includeDescendants when true, an application also reports the hosts of the projects
+     *     beneath it — because an application's reachable surface is its own plus its parts'
+     */
+    public Map<UUID, Map<String, java.util.TreeSet<String>>> hostsByAsset(Principal principal,
+            List<UUID> assetIds, boolean includeDescendants) throws SQLException {
+        if (assetIds == null || assetIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, Map<String, java.util.TreeSet<String>>> out = new LinkedHashMap<>();
+        // `subject` is the asset the caller asked about; `a` is whatever actually holds the edge.
+        //
+        // *** THE SUBJECT ITSELF IS ALWAYS IN THE REACH, AND IT WAS NOT. ***
+        //
+        // This joined `asset_composition` alone, which holds no depth-0 self row — verified against
+        // the engine, not assumed from the schema. So an application with a domain attached directly
+        // to it reported no host at all, which is the exact case the seeded estate is in and the case
+        // most deployments start in: the first host somebody records goes on the application, before
+        // any project exists to hang it on. The UNION ALL puts the subject back.
+        String reach = "  JOIN LATERAL (SELECT subject.id AS id"
+                + (includeDescendants
+                        ? " UNION ALL SELECT c.asset_id FROM asset_composition c "
+                                + "WHERE c.root_id = subject.id"
+                        : "")
+                + ") reach ON true "
+                + "  JOIN asset a ON a.id = reach.id ";
+        try (Connection connection = open(principal);
+                PreparedStatement statement = connection.prepareStatement(
+                        "SELECT subject.id, coalesce(r.attributes ->> 'environment', 'UNSPECIFIED'), "
+                                + "       d.display_name "
+                                + "  FROM asset subject "
+                                + reach
+                                + "  JOIN asset_relationship r ON r.from_asset_id = a.id "
+                                + "                          AND r.valid_until IS NULL "
+                                + "  JOIN asset d ON d.id = r.to_asset_id "
+                                + "  JOIN asset_type dt ON dt.id = d.type_id AND dt.code = 'DOMAIN' "
+                                + " WHERE subject.id = ANY (?)")) {
+            statement.setArray(1, connection.createArrayOf("uuid", assetIds.toArray(new UUID[0])));
+            try (ResultSet r = statement.executeQuery()) {
+                while (r.next()) {
+                    out.computeIfAbsent(r.getObject(1, UUID.class), k -> new LinkedHashMap<>())
+                            .computeIfAbsent(r.getString(2), k -> new java.util.TreeSet<>())
+                            .add(r.getString(3));
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * A filter over the hosts an asset is published on in one environment.
+     *
+     * <p><b>*** THE COLUMN USED TO BE UNFILTERABLE, AND THAT WAS THE DEFECT THIS CLOSES. ***</b> The
+     * domain columns were sent to the interface with {@code filterable: false}, and both inventory
+     * lists validated their filter keys against the declared-field catalogue alone — so a filter on
+     * one was not refused, it was silently dropped, and the unfiltered list came back looking
+     * filtered. "Which projects have a UAT host" was unanswerable on the page whose purpose is to
+     * answer it.
+     *
+     * <p>Two questions, deliberately separate. <b>Presence</b> is the posture question: which systems
+     * have an endpoint in this environment at all, and — the half product principle 1 exists for —
+     * which have none recorded, which is not the same as having none. <b>Contains</b> is the triage
+     * question: somebody has a hostname from an alert and needs the asset it belongs to.
+     *
+     * @param environment the environment code, validated by the caller against the catalogue
+     * @param presence {@code RECORDED}, {@code ABSENT}, or blank for either
+     * @param contains a hostname fragment, matched case-insensitively, or blank for any
+     */
+    public record HostFilter(String environment, String presence, String contains) {
+
+        /** Whether this filter is doing anything at all. */
+        public boolean active() {
+            return "RECORDED".equals(presence) || "ABSENT".equals(presence)
+                    || (contains != null && !contains.isBlank());
+        }
+
+        /**
+         * Applied to one asset's hosts, as {@link InventoryService#hostsByAsset} returns them.
+         *
+         * <p>{@code ABSENT} with a fragment means "no host here matching that", which is a coherent
+         * question and the reason the two are not folded into one parameter.
+         */
+        public boolean matches(Map<String, java.util.TreeSet<String>> hostsByEnvironment) {
+            java.util.Set<String> hosts = hostsByEnvironment == null
+                    ? java.util.Set.of()
+                    : hostsByEnvironment.getOrDefault(environment, new java.util.TreeSet<>());
+            boolean any = contains == null || contains.isBlank()
+                    ? !hosts.isEmpty()
+                    : hosts.stream().anyMatch(host -> host.toLowerCase(Locale.ROOT)
+                            .contains(contains.strip().toLowerCase(Locale.ROOT)));
+            return "ABSENT".equals(presence) ? !any : any;
+        }
+    }
+
+    // ==============================================================================================
+    // The declared-field catalogue itself
+    // ==============================================================================================
+
+    /** An asset type, for the catalogue editor. */
+    public record AssetTypeRow(UUID id, String code, int ordinal, long fieldCount) {
+    }
+
+    /** The permission that governs the catalogue. Declaring a field is not editing an asset. */
+    public static final String FIELD_ADMIN = "cfg.asset.field.manage";
+
+    /** {@code ^[a-z][a-z0-9_]{1,48}$} — the same shape the CHECK constraint enforces. */
+    private static final java.util.regex.Pattern KEY_SHAPE =
+            java.util.regex.Pattern.compile("^[a-z][a-z0-9_]{1,48}$");
+
+    /** The storage kinds the product supplies an editor, a validator and a filter for. */
+    public static final List<String> DATA_TYPES = List.of("TEXT", "LONG_TEXT", "URL", "BOOLEAN",
+            "INTEGER", "SINGLE_SELECT", "MULTI_SELECT");
+
+    /** Every asset type in the tenant, with how many fields each already declares. */
+    public List<AssetTypeRow> assetTypes(Principal principal) throws SQLException {
+        List<AssetTypeRow> rows = new ArrayList<>();
+        try (Connection connection = open(principal);
+                PreparedStatement statement = connection.prepareStatement(
+                        "SELECT t.id, t.code, t.ordinal, "
+                                + "  (SELECT count(*) FROM asset_attribute_definition d "
+                                + "    WHERE d.asset_type_id = t.id AND d.lifecycle_state = 'ACTIVE') "
+                                + "  FROM asset_type t ORDER BY t.ordinal, t.code");
+                ResultSet r = statement.executeQuery()) {
+            while (r.next()) {
+                rows.add(new AssetTypeRow(r.getObject(1, UUID.class), r.getString(2), r.getInt(3),
+                        r.getLong(4)));
+            }
+        }
+        return List.copyOf(rows);
+    }
+
+    /**
+     * Every declared field on a type, DEPRECATED ones included.
+     *
+     * <p>{@link #attributeDefinitions} returns only the active set, which is right for a form. The
+     * catalogue editor needs the deprecated ones too: a field that was retired is still holding
+     * values on every record that had one, and an administrator who cannot see it cannot restore it
+     * and will declare a second field with a different key meaning the same thing.
+     */
+    public List<AttributeDefinition> allDefinitions(Principal principal, String typeCode)
+            throws SQLException {
+        List<AttributeDefinition> rows = new ArrayList<>();
+        try (Connection connection = open(principal);
+                PreparedStatement statement = connection.prepareStatement(
+                        "SELECT d.id, d.attribute_key, coalesce(d.label_i18n->>'en', d.attribute_key), "
+                                + "       d.data_type, d.permitted_values, d.filterable, d.required, "
+                                + "       d.purpose, d.ordinal, d.lifecycle_state, d.row_version, "
+                                + "       coalesce(d.label_i18n->>'vi', '') "
+                                + "  FROM asset_attribute_definition d "
+                                + "  JOIN asset_type t ON t.id = d.asset_type_id "
+                                + " WHERE t.code = ? ORDER BY d.ordinal, d.attribute_key")) {
+            statement.setString(1, typeCode);
+            try (ResultSet r = statement.executeQuery()) {
+                while (r.next()) {
+                    java.sql.Array values = r.getArray(5);
+                    rows.add(new AttributeDefinition(r.getObject(1, UUID.class), r.getString(2),
+                            r.getString(3), r.getString(4),
+                            values == null ? List.of() : List.of((String[]) values.getArray()),
+                            r.getBoolean(6), r.getBoolean(7), r.getString(8), r.getInt(9),
+                            r.getString(10), r.getInt(11), r.getString(12)));
+                }
+            }
+        }
+        return List.copyOf(rows);
+    }
+
+    /**
+     * Which of a select field's permitted values are actually recorded on an asset somewhere.
+     *
+     * <p>Used to refuse the removal of a value that rows are holding. Removing it does not delete
+     * those values — they stay in {@code attributes} and would render as a value nobody declared,
+     * filterable by nothing and explicable by no one. Silent orphaning is the failure this prevents.
+     */
+    public java.util.Set<String> valuesInUse(Principal principal, String typeCode, String key)
+            throws SQLException {
+        java.util.Set<String> used = new java.util.LinkedHashSet<>();
+        try (Connection connection = open(principal);
+                PreparedStatement statement = connection.prepareStatement(
+                        // Handles both shapes in one pass: a MULTI_SELECT is a JSON array and a
+                        // SINGLE_SELECT a JSON string, and jsonb_array_elements_text would error on
+                        // the second. The CASE keeps it to one query over one index.
+                        "SELECT DISTINCT v FROM asset a "
+                                + "  JOIN asset_type t ON t.id = a.type_id, "
+                                + "  LATERAL (SELECT CASE jsonb_typeof(a.attributes -> ?) "
+                                + "                    WHEN 'array' THEN a.attributes -> ? "
+                                + "                    WHEN 'string' THEN jsonb_build_array("
+                                + "                                        a.attributes -> ?) "
+                                + "                    ELSE '[]'::jsonb END AS arr) x, "
+                                + "  LATERAL jsonb_array_elements_text(x.arr) v "
+                                + " WHERE t.code = ?")) {
+            statement.setString(1, key);
+            statement.setString(2, key);
+            statement.setString(3, key);
+            statement.setString(4, typeCode);
+            try (ResultSet r = statement.executeQuery()) {
+                while (r.next()) {
+                    used.add(r.getString(1));
+                }
+            }
+        }
+        return java.util.Set.copyOf(used);
+    }
+
+    /**
+     * Declares a new field on an asset type.
+     *
+     * @return the identifier, or empty if the key is already declared on this type
+     * @throws IllegalArgumentException if the key, type or value list is unusable — these are
+     *     programming or input errors the endpoint turns into a 400, not states to store
+     */
+    public Optional<UUID> createDefinition(Principal principal, String typeCode, String key,
+            String labelEn, String labelVi, String dataType, List<String> permittedValues,
+            boolean filterable, boolean required, String purpose) throws SQLException {
+        String normalised = key == null ? "" : key.strip().toLowerCase(java.util.Locale.ROOT);
+        if (!KEY_SHAPE.matcher(normalised).matches()) {
+            throw new IllegalArgumentException("a field key must match ^[a-z][a-z0-9_]{1,48}$ — it is "
+                    + "addressed in a JSON path and in a query string, and anything else needs "
+                    + "quoting somebody will forget");
+        }
+        if (!DATA_TYPES.contains(dataType)) {
+            throw new IllegalArgumentException("unknown field type " + dataType);
+        }
+        List<String> values = cleanValues(permittedValues);
+        if (isSelectType(dataType) && values.isEmpty()) {
+            throw new IllegalArgumentException("a dropdown with no options is a field nobody can "
+                    + "complete — give it at least one value");
+        }
+        try (Connection connection = open(principal)) {
+            connection.setAutoCommit(false);
+            try {
+                UUID typeId = assetTypeId(connection, typeCode).orElseThrow(
+                        () -> new IllegalArgumentException("no asset type " + typeCode));
+                UUID id;
+                try (PreparedStatement insert = connection.prepareStatement(
+                        "INSERT INTO asset_attribute_definition (tenant_id, asset_type_id, "
+                                + "attribute_key, label_i18n, data_type, permitted_values, "
+                                + "filterable, required, purpose, ordinal, created_by, updated_by) "
+                                + "VALUES (current_tenant_id(), ?, ?, ?::jsonb, ?, ?, ?, ?, ?, "
+                                // Appended at the end of the type's list rather than at a position
+                                // the caller chooses. Ordering is a separate, reorderable concern and
+                                // an insert that could claim an existing ordinal would silently
+                                // reshuffle a form somebody else is looking at.
+                                + "  (SELECT coalesce(max(ordinal), 0) + 1 "
+                                + "     FROM asset_attribute_definition WHERE asset_type_id = ?), "
+                                + "?, ?) ON CONFLICT (tenant_id, asset_type_id, attribute_key) "
+                                + "DO NOTHING RETURNING id")) {
+                    insert.setObject(1, typeId);
+                    insert.setString(2, normalised);
+                    insert.setString(3, aspm.app.runtime.Json.write(labelMap(labelEn, labelVi,
+                            normalised)));
+                    insert.setString(4, dataType);
+                    insert.setArray(5, connection.createArrayOf("text", values.toArray()));
+                    insert.setBoolean(6, filterable);
+                    insert.setBoolean(7, required);
+                    insert.setString(8, blankToNull(purpose));
+                    insert.setObject(9, typeId);
+                    insert.setObject(10, principal == null ? null : principal.principalId());
+                    insert.setObject(11, principal == null ? null : principal.principalId());
+                    try (ResultSet keys = insert.executeQuery()) {
+                        if (!keys.next()) {
+                            connection.rollback();
+                            return Optional.empty();
+                        }
+                        id = keys.getObject(1, UUID.class);
+                    }
+                }
+                // scopeNode is null and that is correct: a field declaration is tenant-wide
+                // configuration, not a change inside one branch of the organization tree. Attaching
+                // it to a node would make it look scoped and hide it from anybody reading the
+                // tenant's configuration history.
+                audit.domainChange(connection, principal, "asset_attribute_definition",
+                        aspm.kernel.audit.contract.DomainChangeKind.CREATED, id, null,
+                        java.util.Map.of("action", "DECLARED", "asset_type", typeCode,
+                                "attribute_key", normalised, "data_type", dataType));
+                connection.commit();
+                return Optional.of(id);
+            } catch (SQLException | RuntimeException e) {
+                connection.rollback();
+                throw e;
+            }
+        }
+    }
+
+    /**
+     * Changes a declared field, within the bounds that keep recorded values meaningful.
+     *
+     * <h2>What cannot change, and why</h2>
+     *
+     * <p><b>The key.</b> It is the JSON key every recorded value is stored under. Renaming it would
+     * orphan every value on every asset in one statement, and nothing afterwards would say so.
+     *
+     * <p><b>The data type.</b> A SINGLE_SELECT holding {@code "ZTNA"} and a MULTI_SELECT holding
+     * {@code ["ZTNA"]} are different documents. Changing the type would leave every existing row in
+     * the shape the old type wrote, and the editor would silently drop what it could not read.
+     *
+     * <p>Both are enforced by simply not reading them from the caller. A tenant that needs either
+     * declares a new field and deprecates this one, which keeps the old values readable.
+     *
+     * @param removable values being dropped from the permitted list that assets still hold. The
+     *     caller supplies the check result rather than this method performing it, so the endpoint can
+     *     report every offending value at once
+     * @return false if the update was refused as stale
+     */
+    public boolean updateDefinition(Principal principal, UUID id, String labelEn, String labelVi,
+            List<String> permittedValues, boolean filterable, boolean required, String purpose,
+            int rowVersion) throws SQLException {
+        List<String> values = cleanValues(permittedValues);
+        try (Connection connection = open(principal)) {
+            connection.setAutoCommit(false);
+            try {
+                boolean applied;
+                try (PreparedStatement update = connection.prepareStatement(
+                        "UPDATE asset_attribute_definition "
+                                + "   SET label_i18n = ?::jsonb, permitted_values = ?, "
+                                + "       filterable = ?, required = ?, purpose = ?, "
+                                + "       updated_at = now(), updated_by = ?, "
+                                + "       row_version = row_version + 1 "
+                                // The select-type guard, at the engine: an UPDATE that emptied a
+                                // dropdown would leave a required field nobody can complete, and the
+                                // CHECK constraint refuses it whichever path the write came through.
+                                + " WHERE id = ? AND row_version = ?")) {
+                    update.setString(1, aspm.app.runtime.Json.write(
+                            labelMap(labelEn, labelVi, null)));
+                    update.setArray(2, connection.createArrayOf("text", values.toArray()));
+                    update.setBoolean(3, filterable);
+                    update.setBoolean(4, required);
+                    update.setString(5, blankToNull(purpose));
+                    update.setObject(6, principal == null ? null : principal.principalId());
+                    update.setObject(7, id);
+                    update.setInt(8, rowVersion);
+                    applied = update.executeUpdate() == 1;
+                }
+                if (!applied) {
+                    connection.rollback();
+                    return false;
+                }
+                audit.domainChange(connection, principal, "asset_attribute_definition",
+                        aspm.kernel.audit.contract.DomainChangeKind.UPDATED, id, null,
+                        java.util.Map.of("action", "AMENDED", "permitted_values", values,
+                                "filterable", filterable, "required", required));
+                connection.commit();
+                return true;
+            } catch (SQLException | RuntimeException e) {
+                connection.rollback();
+                throw e;
+            }
+        }
+    }
+
+    /**
+     * Retires a field, or brings one back.
+     *
+     * <p>Never a delete, and there is no DELETE grant on the table. Values already recorded under
+     * this key stay exactly where they are: deprecation removes the field from forms and from column
+     * pickers, and restoring it makes every one of those values visible again. Deleting the
+     * definition would leave the data with nothing to explain it.
+     */
+    public boolean setDefinitionLifecycle(Principal principal, UUID id, boolean active,
+            int rowVersion) throws SQLException {
+        try (Connection connection = open(principal)) {
+            connection.setAutoCommit(false);
+            try {
+                boolean applied;
+                try (PreparedStatement update = connection.prepareStatement(
+                        "UPDATE asset_attribute_definition SET lifecycle_state = ?, "
+                                + "updated_at = now(), updated_by = ?, row_version = row_version + 1 "
+                                + " WHERE id = ? AND row_version = ?")) {
+                    update.setString(1, active ? "ACTIVE" : "DEPRECATED");
+                    update.setObject(2, principal == null ? null : principal.principalId());
+                    update.setObject(3, id);
+                    update.setInt(4, rowVersion);
+                    applied = update.executeUpdate() == 1;
+                }
+                if (!applied) {
+                    connection.rollback();
+                    return false;
+                }
+                audit.domainChange(connection, principal, "asset_attribute_definition",
+                        aspm.kernel.audit.contract.DomainChangeKind.UPDATED, id, null,
+                        java.util.Map.of("action", active ? "RESTORED" : "DEPRECATED"));
+                connection.commit();
+                return true;
+            } catch (SQLException | RuntimeException e) {
+                connection.rollback();
+                throw e;
+            }
+        }
+    }
+
+    /** Moves a field up or down within its type's ordering. */
+    public boolean reorderDefinition(Principal principal, UUID id, int delta) throws SQLException {
+        try (Connection connection = open(principal)) {
+            connection.setAutoCommit(false);
+            try {
+                boolean applied;
+                try (PreparedStatement update = connection.prepareStatement(
+                        "UPDATE asset_attribute_definition SET ordinal = greatest(0, ordinal + ?), "
+                                + "updated_at = now(), updated_by = ?, row_version = row_version + 1 "
+                                + " WHERE id = ?")) {
+                    // Ordinals need not be dense or unique — the read orders by (ordinal,
+                    // attribute_key), so a tie resolves the same way on every load rather than
+                    // shuffling. A dense re-pack would rewrite every row of the type to move one.
+                    update.setInt(1, delta * 3);
+                    update.setObject(2, principal == null ? null : principal.principalId());
+                    update.setObject(3, id);
+                    applied = update.executeUpdate() == 1;
+                }
+                if (applied) {
+                    audit.domainChange(connection, principal, "asset_attribute_definition",
+                            aspm.kernel.audit.contract.DomainChangeKind.UPDATED, id, null,
+                            java.util.Map.of("action", "REORDERED", "delta", delta));
+                }
+                connection.commit();
+                return applied;
+            } catch (SQLException | RuntimeException e) {
+                connection.rollback();
+                throw e;
+            }
+        }
+    }
+
+    // ==============================================================================================
+    // The endpoint environment catalogue
+    // ==============================================================================================
+
+    /**
+     * One environment an endpoint can be published in.
+     *
+     * <p>Three lifecycle states, and only two of them exist in the table. {@code ACTIVE} and
+     * {@code DEPRECATED} are stored; <b>{@code UNDECLARED} is synthetic</b> and means the environment
+     * appears on a recorded edge and in no catalogue row. Undeclared environments are reported rather
+     * than hidden: an importer may carry an environment name nobody has declared, and dropping it
+     * from the interface would hide a recorded host, which product principle 1 forbids. They are
+     * offered as columns and never offered in a form, because a form option that is not in the
+     * catalogue is a vocabulary nobody agreed to.
+     *
+     * @param recorded whether any current published-on edge actually carries this environment. It is
+     *     what separates "declared and nobody has recorded one" — a column worth offering, because an
+     *     empty cell is the answer — from "deprecated and holding data", which must stay visible
+     * @param id null for an undeclared environment, which has no catalogue row to amend
+     */
+    public record EndpointEnvironment(UUID id, String code, String label, String labelVi,
+            String purpose, int ordinal, String lifecycleState, boolean recorded, int rowVersion) {
+
+        /** Offered in a form: the tenant declares it and has not retired it. */
+        public boolean active() {
+            return "ACTIVE".equals(lifecycleState);
+        }
+
+        /** Declared at all, as against inferred from an edge. */
+        public boolean declared() {
+            return id != null;
+        }
+
+        /**
+         * Offered as a column. Active environments are offered whether or not anything is recorded —
+         * "no UAT host recorded against this project" is an answer somebody needs, and the column is
+         * where it is given (product principle 1). A retired or undeclared one is offered only while
+         * it still has data to show.
+         */
+        public boolean columnWorthy() {
+            return active() || recorded;
+        }
+    }
+
+    /** {@code ^[A-Z][A-Z0-9_]{1,30}$} — the same shape the CHECK constraint enforces. */
+    private static final java.util.regex.Pattern ENVIRONMENT_SHAPE =
+            java.util.regex.Pattern.compile("^[A-Z][A-Z0-9_]{1,30}$");
+
+    /**
+     * Every environment the tenant declares, plus every one its data carries.
+     *
+     * <p>One query and one type for four callers — the two editors, which offer the active ones; the
+     * two inventory lists, which offer columns for the ones worth a column and validate a host filter
+     * against the same set; and the catalogue editor. Deriving them separately is how the application
+     * editor came to offer PRODUCTION and STAGING while the project editor offered PRODUCTION and
+     * UAT.
+     */
+    public List<EndpointEnvironment> endpointEnvironments(Principal principal) throws SQLException {
+        List<EndpointEnvironment> rows = new ArrayList<>();
+        try (Connection connection = open(principal);
+                PreparedStatement statement = connection.prepareStatement(
+                        "WITH declared AS ("
+                                + "  SELECT e.id, e.code, coalesce(e.label_i18n ->> 'en', e.code) "
+                                + "         AS label, coalesce(e.label_i18n ->> 'vi', '') AS label_vi,"
+                                + "         e.purpose, e.ordinal, e.lifecycle_state, e.row_version "
+                                + "    FROM asset_endpoint_environment e), "
+                                + "recorded AS ("
+                                // Same coalesce the host columns use, so an edge with no environment
+                                // recorded lands under the same name in both places rather than
+                                // appearing in one and vanishing from the other.
+                                + "  SELECT DISTINCT coalesce(r.attributes ->> 'environment', "
+                                + "                          'UNSPECIFIED') AS code "
+                                + "    FROM asset_relationship r "
+                                + "    JOIN asset d ON d.id = r.to_asset_id "
+                                + "    JOIN asset_type dt ON dt.id = d.type_id "
+                                + "                      AND dt.code = 'DOMAIN' "
+                                + "   WHERE r.valid_until IS NULL) "
+                                + "SELECT d.id, coalesce(d.code, o.code) AS code, "
+                                + "       coalesce(d.label, o.code) AS label, "
+                                + "       coalesce(d.label_vi, '') AS label_vi, d.purpose, "
+                                // An undeclared environment sorts after every declared one. It has no
+                                // place the tenant chose, and putting it first would give an imported
+                                // name precedence over the vocabulary somebody agreed.
+                                + "       coalesce(d.ordinal, 100000) AS ordinal, "
+                                + "       coalesce(d.lifecycle_state, 'UNDECLARED') AS lifecycle, "
+                                + "       (o.code IS NOT NULL) AS recorded, "
+                                + "       coalesce(d.row_version, 0) AS row_version "
+                                + "  FROM declared d FULL OUTER JOIN recorded o ON o.code = d.code "
+                                + " ORDER BY ordinal, code");
+                ResultSet r = statement.executeQuery()) {
+            while (r.next()) {
+                rows.add(new EndpointEnvironment(r.getObject(1, UUID.class), r.getString(2),
+                        r.getString(3), r.getString(4), r.getString(5), r.getInt(6), r.getString(7),
+                        r.getBoolean(8), r.getInt(9)));
+            }
+        }
+        return List.copyOf(rows);
+    }
+
+    /**
+     * Declares an environment.
+     *
+     * <p>The code is upper-cased rather than rejected for case: it is matched against
+     * {@code attributes->>'environment'} on edges that importers write, and a tenant who types
+     * {@code uat} means the environment the data spells {@code UAT}. A code that cannot be
+     * normalised into shape is refused, because a code with a space or a dot in it cannot be put in
+     * a query-string parameter without quoting somebody will forget.
+     *
+     * @return the identifier, or empty if that code is already declared — including as a DEPRECATED
+     *     row, which is restored rather than duplicated
+     */
+    public Optional<UUID> createEnvironment(Principal principal, String code, String labelEn,
+            String labelVi, String purpose) throws SQLException {
+        String normalised = code == null ? "" : code.strip().toUpperCase(Locale.ROOT);
+        if (!ENVIRONMENT_SHAPE.matcher(normalised).matches()) {
+            throw new IllegalArgumentException("an environment code must match ^[A-Z][A-Z0-9_]{1,30}$ "
+                    + "— it is matched against the environment recorded on an edge and carried in a "
+                    + "query string");
+        }
+        try (Connection connection = open(principal)) {
+            connection.setAutoCommit(false);
+            try {
+                UUID id;
+                try (PreparedStatement insert = connection.prepareStatement(
+                        "INSERT INTO asset_endpoint_environment (tenant_id, code, label_i18n, "
+                                + "purpose, ordinal, created_by, updated_by) "
+                                + "VALUES (current_tenant_id(), ?, ?::jsonb, ?, "
+                                // Ten past the last, matching the gaps V069 left: a tenant inserting
+                                // one between two others should not have to renumber the rest.
+                                + "  (SELECT coalesce(max(ordinal), 0) + 10 "
+                                + "     FROM asset_endpoint_environment), ?, ?) "
+                                + "ON CONFLICT (tenant_id, code) DO NOTHING RETURNING id")) {
+                    insert.setString(1, normalised);
+                    insert.setString(2, aspm.app.runtime.Json.write(
+                            labelMap(labelEn, labelVi, normalised)));
+                    insert.setString(3, blankToNull(purpose));
+                    insert.setObject(4, principal == null ? null : principal.principalId());
+                    insert.setObject(5, principal == null ? null : principal.principalId());
+                    try (ResultSet keys = insert.executeQuery()) {
+                        if (!keys.next()) {
+                            connection.rollback();
+                            return Optional.empty();
+                        }
+                        id = keys.getObject(1, UUID.class);
+                    }
+                }
+                // scopeNode null, as with a field declaration: the vocabulary is tenant-wide
+                // configuration and not a change inside one branch of the organization tree.
+                audit.domainChange(connection, principal, "asset_endpoint_environment",
+                        aspm.kernel.audit.contract.DomainChangeKind.CREATED, id, null,
+                        java.util.Map.of("action", "DECLARED", "code", normalised));
+                connection.commit();
+                return Optional.of(id);
+            } catch (SQLException | RuntimeException e) {
+                connection.rollback();
+                throw e;
+            }
+        }
+    }
+
+    /**
+     * Relabels an environment, or restates what it is for.
+     *
+     * <p><b>The code cannot change.</b> It is the value recorded on every edge published in this
+     * environment; renaming it would orphan all of them in one statement and nothing afterwards would
+     * say so. A tenant that needs a different code declares one and deprecates this one, which keeps
+     * the recorded edges explicable — the same rule, for the same reason, as a declared field's key.
+     *
+     * @return false if the update was refused as stale
+     */
+    public boolean updateEnvironment(Principal principal, UUID id, String labelEn, String labelVi,
+            String purpose, int rowVersion) throws SQLException {
+        try (Connection connection = open(principal)) {
+            connection.setAutoCommit(false);
+            try {
+                boolean applied;
+                try (PreparedStatement update = connection.prepareStatement(
+                        "UPDATE asset_endpoint_environment SET label_i18n = ?::jsonb, purpose = ?, "
+                                + "updated_at = now(), updated_by = ?, row_version = row_version + 1 "
+                                + " WHERE id = ? AND row_version = ?")) {
+                    update.setString(1, aspm.app.runtime.Json.write(
+                            labelMap(labelEn, labelVi, null)));
+                    update.setString(2, blankToNull(purpose));
+                    update.setObject(3, principal == null ? null : principal.principalId());
+                    update.setObject(4, id);
+                    update.setInt(5, rowVersion);
+                    applied = update.executeUpdate() == 1;
+                }
+                if (!applied) {
+                    connection.rollback();
+                    return false;
+                }
+                audit.domainChange(connection, principal, "asset_endpoint_environment",
+                        aspm.kernel.audit.contract.DomainChangeKind.UPDATED, id, null,
+                        java.util.Map.of("action", "AMENDED"));
+                connection.commit();
+                return true;
+            } catch (SQLException | RuntimeException e) {
+                connection.rollback();
+                throw e;
+            }
+        }
+    }
+
+    /**
+     * Retires an environment, or brings one back.
+     *
+     * <p>Never a delete, and there is no DELETE grant on the table. Retiring stops the forms offering
+     * it; it does not touch a single edge. Hosts already published in it keep their edges, keep their
+     * column while those edges are current, and reappear in every form the moment it is restored —
+     * which is why the editor says how many are recorded before anybody presses the button.
+     */
+    public boolean setEnvironmentLifecycle(Principal principal, UUID id, boolean active,
+            int rowVersion) throws SQLException {
+        try (Connection connection = open(principal)) {
+            connection.setAutoCommit(false);
+            try {
+                boolean applied;
+                try (PreparedStatement update = connection.prepareStatement(
+                        "UPDATE asset_endpoint_environment SET lifecycle_state = ?, "
+                                + "updated_at = now(), updated_by = ?, row_version = row_version + 1 "
+                                + " WHERE id = ? AND row_version = ?")) {
+                    update.setString(1, active ? "ACTIVE" : "DEPRECATED");
+                    update.setObject(2, principal == null ? null : principal.principalId());
+                    update.setObject(3, id);
+                    update.setInt(4, rowVersion);
+                    applied = update.executeUpdate() == 1;
+                }
+                if (!applied) {
+                    connection.rollback();
+                    return false;
+                }
+                audit.domainChange(connection, principal, "asset_endpoint_environment",
+                        aspm.kernel.audit.contract.DomainChangeKind.UPDATED, id, null,
+                        java.util.Map.of("action", active ? "RESTORED" : "DEPRECATED"));
+                connection.commit();
+                return true;
+            } catch (SQLException | RuntimeException e) {
+                connection.rollback();
+                throw e;
+            }
+        }
+    }
+
+    /** Moves an environment up or down the order the forms and the column picker render. */
+    public boolean reorderEnvironment(Principal principal, UUID id, int delta) throws SQLException {
+        try (Connection connection = open(principal)) {
+            connection.setAutoCommit(false);
+            try {
+                boolean applied;
+                try (PreparedStatement update = connection.prepareStatement(
+                        "UPDATE asset_endpoint_environment "
+                                + "   SET ordinal = greatest(0, ordinal + ?), updated_at = now(), "
+                                + "       updated_by = ?, row_version = row_version + 1 "
+                                + " WHERE id = ?")) {
+                    // Ordinals are neither dense nor unique — the read orders by (ordinal, code), so a
+                    // tie resolves the same way on every load. Fifteen rather than three because
+                    // V069 spaced the defaults ten apart.
+                    update.setInt(1, delta * 15);
+                    update.setObject(2, principal == null ? null : principal.principalId());
+                    update.setObject(3, id);
+                    applied = update.executeUpdate() == 1;
+                }
+                if (applied) {
+                    audit.domainChange(connection, principal, "asset_endpoint_environment",
+                            aspm.kernel.audit.contract.DomainChangeKind.UPDATED, id, null,
+                            java.util.Map.of("action", "REORDERED", "delta", delta));
+                }
+                connection.commit();
+                return applied;
+            } catch (SQLException | RuntimeException e) {
+                connection.rollback();
+                throw e;
+            }
+        }
+    }
+
+    /**
+     * How many current endpoints are published in one environment, tenant-wide.
+     *
+     * <p>Shown beside the retire button. Deprecating an environment that forty hosts are published in
+     * removes it from every form while leaving all forty edges current, and an administrator who
+     * cannot see the number before pressing the button finds out afterwards from somebody else.
+     */
+    public long endpointsInEnvironment(Principal principal, String code) throws SQLException {
+        try (Connection connection = open(principal);
+                PreparedStatement statement = connection.prepareStatement(
+                        "SELECT count(*) FROM asset_relationship r "
+                                + "  JOIN asset d ON d.id = r.to_asset_id "
+                                + "  JOIN asset_type dt ON dt.id = d.type_id AND dt.code = 'DOMAIN' "
+                                + " WHERE r.valid_until IS NULL "
+                                + "   AND coalesce(r.attributes ->> 'environment', 'UNSPECIFIED') "
+                                + "       = ?")) {
+            statement.setString(1, code);
+            try (ResultSet r = statement.executeQuery()) {
+                return r.next() ? r.getLong(1) : 0L;
+            }
+        }
+    }
+
+    private static boolean isSelectType(String dataType) {
+        return "SINGLE_SELECT".equals(dataType) || "MULTI_SELECT".equals(dataType);
+    }
+
+    /** Trimmed, de-duplicated, order preserved. A list with a blank in it is a dropdown with a gap. */
+    private static List<String> cleanValues(List<String> values) {
+        java.util.LinkedHashSet<String> out = new java.util.LinkedHashSet<>();
+        if (values != null) {
+            for (String value : values) {
+                if (value != null && !value.strip().isEmpty()) {
+                    out.add(value.strip());
+                }
+            }
+        }
+        return List.copyOf(out);
+    }
+
+    /**
+     * The label document. Vietnamese is written when supplied and omitted when not — an empty string
+     * would make the interface render a blank label in that locale rather than falling back to
+     * English, which is the worse of the two failures (NFR-INT-003).
+     */
+    private static Map<String, String> labelMap(String labelEn, String labelVi, String fallback) {
+        Map<String, String> labels = new LinkedHashMap<>();
+        String en = labelEn == null ? "" : labelEn.strip();
+        labels.put("en", en.isEmpty() ? (fallback == null ? "" : fallback) : en);
+        String vi = labelVi == null ? "" : labelVi.strip();
+        if (!vi.isEmpty()) {
+            labels.put("vi", vi);
+        }
+        return labels;
+    }
+
+    /** A submitted attribute value the tenant's own catalogue refuses. */
+    public record AttributeViolation(String key, String code, String message) {
+    }
+
+    /**
+     * Builds the attribute document from a JSON payload, coerced by each field's declared type.
+     *
+     * <p>Only DECLARED keys are read. A payload naming a field nobody declared is ignored rather than
+     * stored: {@code attributes} is merged with {@code ||}, so an unfiltered write would let any
+     * caller add arbitrary keys to an asset for ever, and nothing would ever remove them.
+     *
+     * <p>A blank {@code INTEGER} is written as JSON {@code null} and a blank text field as an empty
+     * string. The asymmetry is deliberate — {@code ""} is not a number, and a zero would claim the
+     * project exposes no endpoints when the truth is that nobody has counted (product principle 1).
+     */
+    public Map<String, Object> attributeDocumentFrom(List<AttributeDefinition> definitions,
+            Map<String, Object> payload) {
+        Map<String, Object> document = new LinkedHashMap<>();
+        for (AttributeDefinition definition : definitions) {
+            Object raw = payload.get(definition.key());
+            switch (definition.dataType()) {
+                case "MULTI_SELECT" -> {
+                    List<String> values = new ArrayList<>();
+                    if (raw instanceof List<?> list) {
+                        for (Object item : list) {
+                            String value = item == null ? "" : String.valueOf(item).strip();
+                            if (!value.isEmpty()) {
+                                values.add(value);
+                            }
+                        }
+                    }
+                    document.put(definition.key(), List.copyOf(values));
+                }
+                case "BOOLEAN" -> document.put(definition.key(),
+                        raw instanceof Boolean flag ? flag
+                                : Boolean.parseBoolean(String.valueOf(raw)));
+                case "INTEGER" -> {
+                    String value = raw == null ? "" : String.valueOf(raw).strip();
+                    if (value.isEmpty()) {
+                        document.put(definition.key(), null);
+                    } else {
+                        try {
+                            document.put(definition.key(), Long.valueOf(value.contains(".")
+                                    ? String.valueOf((long) Double.parseDouble(value)) : value));
+                        } catch (NumberFormatException e) {
+                            // Kept as the text that was sent so the validator below can name it back
+                            // to the person. Discarding it here would report "not a number" beside an
+                            // empty box, which is the least useful form of that message.
+                            document.put(definition.key(), value);
+                        }
+                    }
+                }
+                default -> document.put(definition.key(),
+                        raw == null ? "" : String.valueOf(raw).strip());
+            }
+        }
+        return document;
+    }
+
+    /**
+     * Checks a document against the catalogue that produced its fields.
+     *
+     * <h2>Why this exists, given that the editor renders a dropdown</h2>
+     *
+     * <p>The dropdown is on the client, and the client is under the caller's control. Until now the
+     * only thing standing between a submitted value and {@code asset.attributes} was the form markup:
+     * {@link #attributeDocument} coerced types and never once compared a value against
+     * {@code permitted_values}. A caller posting {@code {"waf":"anything"}} was stored verbatim, and
+     * every filter, count and report built on that field silently acquired a value nobody declared.
+     *
+     * <p>This is the same defect class the product exists to find in customers' software — trusting a
+     * constraint that was only ever enforced in the interface — so it is checked at the write.
+     *
+     * @return the violations, empty when the document is acceptable
+     */
+    public List<AttributeViolation> attributeViolations(List<AttributeDefinition> definitions,
+            Map<String, Object> document) {
+        List<AttributeViolation> problems = new ArrayList<>();
+        for (AttributeDefinition definition : definitions) {
+            Object value = document.get(definition.key());
+            switch (definition.dataType()) {
+                case "SINGLE_SELECT" -> {
+                    String chosen = value == null ? "" : String.valueOf(value).strip();
+                    if (!chosen.isEmpty() && !definition.permittedValues().contains(chosen)) {
+                        problems.add(new AttributeViolation(definition.key(), "VALUE_NOT_PERMITTED",
+                                definition.label() + ": \"" + chosen + "\" is not one of the values "
+                                        + "this tenant declared for it"));
+                    }
+                }
+                case "MULTI_SELECT" -> {
+                    if (value instanceof List<?> list) {
+                        for (Object item : list) {
+                            String chosen = item == null ? "" : String.valueOf(item).strip();
+                            if (!chosen.isEmpty()
+                                    && !definition.permittedValues().contains(chosen)) {
+                                problems.add(new AttributeViolation(definition.key(),
+                                        "VALUE_NOT_PERMITTED", definition.label() + ": \"" + chosen
+                                                + "\" is not one of the values this tenant declared "
+                                                + "for it"));
+                            }
+                        }
+                    }
+                }
+                case "INTEGER" -> {
+                    if (value != null && !(value instanceof Number)) {
+                        problems.add(new AttributeViolation(definition.key(), "NOT_A_NUMBER",
+                                definition.label() + " must be a whole number"));
+                    } else if (value instanceof Number number && number.longValue() < 0) {
+                        problems.add(new AttributeViolation(definition.key(), "NEGATIVE",
+                                definition.label() + " cannot be negative"));
+                    }
+                }
+                case "URL" -> {
+                    String url = value == null ? "" : String.valueOf(value).strip();
+                    // http and https only. A javascript: or data: URL stored here is rendered as a
+                    // link on a page other people open, which turns an inventory field into a
+                    // delivery mechanism.
+                    if (!url.isEmpty() && !url.startsWith("http://") && !url.startsWith("https://")) {
+                        problems.add(new AttributeViolation(definition.key(), "NOT_A_URL",
+                                definition.label() + " must be an http:// or https:// address"));
+                    }
+                }
+                default -> { }
+            }
+            if (definition.required() && isBlankValue(value)) {
+                problems.add(new AttributeViolation(definition.key(), "REQUIRED",
+                        definition.label() + " is required"));
+            }
+        }
+        return List.copyOf(problems);
+    }
+
+    private static boolean isBlankValue(Object value) {
+        if (value == null) {
+            return true;
+        }
+        if (value instanceof List<?> list) {
+            return list.isEmpty();
+        }
+        return String.valueOf(value).strip().isEmpty();
+    }
+
+    // ==============================================================================================
+    // Projects
+    // ==============================================================================================
+
+    /**
+     * Everything the project editor can change.
+     *
+     * @param attributes the declared-attribute document, already coerced by
+     *     {@link #attributeDocumentFrom} and checked by {@link #attributeViolations}
+     * @param technicalContactId the person to call. Distinct from the delivery team recorded in the
+     *     attributes: a team is accountable, a person answers
+     */
+    public record ProjectDraft(UUID id, String name, UUID owningNodeId, UUID criticalityTierId,
+            String exposureDeclared, UUID technicalContactId, Map<String, Object> attributes,
+            Map<String, List<String>> domains, String repository, String repositoryBranch,
+            Integer rowVersion) {
+    }
+
+    /**
+     * Updates one project's record: its own columns, its declared attributes, and the assets it is
+     * related to.
+     *
+     * <p>One transaction, for the same reason the application save is one: a project whose domain
+     * edge was written and whose attributes were not is a half-recorded inventory that reads as a
+     * whole one.
+     *
+     * <p><b>Update only.</b> Projects are created by the composition pipeline and by import, which
+     * establish the edge to their application; this path deliberately cannot create one, because a
+     * project with no application above it is invisible to every rollup on the platform.
+     *
+     * @return the identifier, or empty if the update was refused as stale
+     */
+    public Optional<UUID> saveProject(Principal principal, ProjectDraft draft) throws SQLException {
+        Objects.requireNonNull(draft.id(), "saveProject updates an existing project");
+        try (Connection connection = open(principal)) {
+            connection.setAutoCommit(false);
+            try (PreparedStatement update = connection.prepareStatement(
+                    "UPDATE asset SET display_name = ?, criticality_mode = ?, "
+                            + "criticality_tier_id = ?, exposure_declared = ?, "
+                            + "exposure_declared_by = CASE WHEN ?::text IS NULL "
+                            + "                            THEN exposure_declared_by ELSE ? END, "
+                            + "exposure_declared_at = CASE WHEN ?::text IS NULL "
+                            + "                            THEN exposure_declared_at ELSE now() END, "
+                            + "technical_contact_id = ?, "
+                            // Merged, never replaced. A project carries attributes this form does not
+                            // render — written by an importer, or declared after this page was built —
+                            // and replacing the object would drop them with no trace.
+                            + "attributes = attributes || ?::jsonb, updated_at = now(), "
+                            + "updated_by = ?, row_version = row_version + 1 "
+                            + " WHERE id = ? AND row_version = ?")) {
+                update.setString(1, draft.name().strip());
+                update.setString(2, draft.criticalityTierId() == null ? "INHERITED" : "ASSIGNED");
+                update.setObject(3, draft.criticalityTierId());
+                update.setString(4, blankToNull(draft.exposureDeclared()));
+                update.setString(5, blankToNull(draft.exposureDeclared()));
+                update.setObject(6, principal == null ? null : principal.principalId());
+                update.setString(7, blankToNull(draft.exposureDeclared()));
+                update.setObject(8, draft.technicalContactId());
+                update.setString(9, aspm.app.runtime.Json.write(
+                        draft.attributes() == null ? Map.of() : draft.attributes()));
+                update.setObject(10, principal == null ? null : principal.principalId());
+                update.setObject(11, draft.id());
+                update.setInt(12, draft.rowVersion() == null ? -1 : draft.rowVersion());
+                if (update.executeUpdate() != 1) {
+                    connection.rollback();
+                    return Optional.empty();
+                }
+            } catch (SQLException | RuntimeException e) {
+                connection.rollback();
+                throw e;
+            }
+            try {
+                // Create-or-reuse, exactly as the application editor does it: two projects deployed on
+                // one host are two edges to ONE domain asset. That is what makes "everything reachable
+                // at this host" answerable, and it is lost the moment a domain becomes a text column.
+                //
+                // Environments come from the tenant's catalogue (V069), not from two names written
+                // here. The pair that used to be named — PRODUCTION and UAT — disagreed with the
+                // application editor's PRODUCTION and STAGING, so each form could record an
+                // environment the other could not.
+                linkEndpoints(connection, principal, draft.id(), draft.domains());
+                // A REFERENCE to a repository and a branch name, never a clone. ADR-024: the platform
+                // never fetches, clones or persists source code and holds no Git credentials.
+                linkRepository(connection, principal, draft.id(), draft.repository(),
+                        draft.repositoryBranch());
+
+                // The attribute KEYS, not the values (SEC-AUD-022). A declared field can hold anything
+                // a tenant decides to put in it; the record says what was touched without copying it.
+                audit.domainChange(connection, principal, "asset",
+                        aspm.kernel.audit.contract.DomainChangeKind.UPDATED, draft.id(),
+                        aspm.app.audit.AuditScopes.ofAsset(connection, draft.id()),
+                        java.util.Map.of("asset_type", aspm.app.inventory.ProjectQuery.PROJECT_TYPE,
+                                "name", draft.name() == null ? "" : draft.name().strip(),
+                                "attributes_written", draft.attributes() == null
+                                        ? List.of() : List.copyOf(draft.attributes().keySet())));
+                connection.commit();
+                return Optional.of(draft.id());
+            } catch (SQLException | RuntimeException e) {
+                connection.rollback();
+                throw e;
+            }
+        }
     }
 
     /** One component asset, re-validated against the application it is reached through. */

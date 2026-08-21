@@ -317,12 +317,10 @@ public final class ApplicationPages {
                 .append("</h2><p class=\"fs-12 muted\">")
                 .append(Html.text(messages.get("app.editor.technicalLede")))
                 .append("</p></div><div class=\"card-body\"><div class=\"form-grid\">")
-                .append(Forms.field(messages, "production_domain", "app.field.prodDomain", "text",
-                        endpointOf(related, "PRODUCTION"), false,
-                        messages.get("app.field.domainHint")))
-                .append(Forms.field(messages, "staging_domain", "app.field.stagingDomain", "text",
-                        endpointOf(related, "STAGING"), false,
-                        messages.get("app.field.domainHint")))
+                // One input per environment the tenant declares, named `domain.<CODE>` (ADR-061).
+                // Production and Staging used to be named here while the project form named
+                // Production and UAT, so neither form could record what the other could.
+                .append(endpointFields(messages, principal, related))
                 .append(Forms.field(messages, "repository", "app.field.repository", "text",
                         repositoryOf(related), false, messages.get("app.field.repositoryHint")))
                 .append("</div><div class=\"mt-6\">")
@@ -377,10 +375,27 @@ public final class ApplicationPages {
                     : "/applications/" + id + "/edit?invalid=1");
         }
 
+        // Endpoints, by environment, from the `domain.<CODE>` fields the form rendered. Only the
+        // environments the form actually submitted are touched, so an environment this page did not
+        // show keeps whatever it holds.
+        Map<String, List<String>> domains = new java.util.LinkedHashMap<>();
+        for (Map.Entry<String, String> field : form.entrySet()) {
+            if (field.getKey().startsWith("domain.") && field.getKey().length() > "domain.".length()) {
+                List<String> hosts = new java.util.ArrayList<>();
+                for (String host : field.getValue() == null
+                        ? new String[0] : field.getValue().split(",", -1)) {
+                    if (!host.strip().isEmpty() && !hosts.contains(host.strip())) {
+                        hosts.add(host.strip());
+                    }
+                }
+                domains.put(field.getKey().substring("domain.".length()), List.copyOf(hosts));
+            }
+        }
+
         var draft = new InventoryService.ApplicationDraft(id, name, node,
                 uuid(form.get("criticality")), form.get("exposure"), form.get("description"),
                 form.get("user_base"), form.get("features"), form.get("tags"),
-                form.get("production_domain"), form.get("staging_domain"), form.get("repository"),
+                domains, form.get("repository"),
                 integer(form.get("row_version")));
 
         Optional<UUID> saved = inventory.saveApplication(principal, draft);
@@ -1618,10 +1633,33 @@ public final class ApplicationPages {
         return all;
     }
 
-    private static String endpointOf(List<InventoryService.Related> related, String environment) {
+    /**
+     * One text input per declared environment, named {@code domain.<CODE>}.
+     *
+     * <p>Comma-separated, because an asset published on two hosts in one environment is a real state
+     * and a single-valued input would show one of them and close the edge to the other on save.
+     */
+    private String endpointFields(Messages messages, Principal principal,
+            List<InventoryService.Related> related) throws java.sql.SQLException {
+        StringBuilder out = new StringBuilder(512);
+        for (InventoryService.EndpointEnvironment environment
+                : inventory.endpointEnvironments(principal)) {
+            String recorded = String.join(", ", endpointsOf(related, environment.code()));
+            if (!environment.active() && recorded.isEmpty()) {
+                continue;
+            }
+            out.append(Forms.field(messages, "domain." + environment.code(), null, "text",
+                    recorded, false, messages.get("app.field.domainHint"),
+                    environment.label() + " domain"));
+        }
+        return out.toString();
+    }
+
+    private static List<String> endpointsOf(List<InventoryService.Related> related,
+            String environment) {
         return related.stream()
                 .filter(r -> "PUBLISHED_ON".equals(r.edgeType()) && environment.equals(r.environment()))
-                .map(InventoryService.Related::name).findFirst().orElse("");
+                .map(InventoryService.Related::name).sorted().toList();
     }
 
     private static String repositoryOf(List<InventoryService.Related> related) {

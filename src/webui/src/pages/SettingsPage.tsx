@@ -4,6 +4,8 @@ import { cn } from "@/lib/utils";
 import { AiProviders } from "@/components/AiProviders";
 import { AlertSubscriptions, RescanSchedule } from "@/components/ServiceCredentials";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { EndpointEnvironments } from "@/components/EndpointEnvironments";
+import { FieldCatalogue } from "@/components/FieldCatalogue";
 
 /**
  * Platform configuration — how the platform behaves, as distinct from who may use it.
@@ -41,7 +43,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 export function SettingsPage() {
   const [params, setParams] = useSearchParams();
   const requested = params.get("tab");
-  const tab = requested === "integrations" ? "integrations" : "ai";
+  const tab = requested === "integrations" ? "integrations"
+    : requested === "fields" ? "fields" : "ai";
 
   return (
     <div className="flex flex-col gap-4 p-4 md:p-6">
@@ -59,13 +62,26 @@ export function SettingsPage() {
         <TabLink active={tab === "ai"} onClick={() => setParams({}, { replace: true })}>
           AI models
         </TabLink>
+        <TabLink active={tab === "fields"}
+                 onClick={() => setParams({ tab: "fields" }, { replace: true })}>
+          Asset fields
+        </TabLink>
         <TabLink active={tab === "integrations"}
                  onClick={() => setParams({ tab: "integrations" }, { replace: true })}>
           Outbound and scheduled
         </TabLink>
       </div>
 
-      {tab === "ai" ? (
+      {tab === "fields" ? (
+        // Both halves of the inventory's vocabulary, on one tab. A declared field is what the
+        // platform asks ABOUT an asset; an endpoint environment is where it asks for a host. They are
+        // administered by the same person under the same permission, and a separate tab for the
+        // second would hide it from whoever came here to configure the first.
+        <div className="flex flex-col gap-6">
+          <FieldCatalogue />
+          <EndpointEnvironments />
+        </div>
+      ) : tab === "ai" ? (
         <div className="flex flex-col gap-5">
           <AiProviders />
           <Card>

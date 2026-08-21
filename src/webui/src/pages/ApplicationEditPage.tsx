@@ -11,16 +11,31 @@ import { Combobox } from "@/components/Combobox";
 
 interface Owner { id: string; name: string; typeCode: string; depth: number }
 interface Tier { id: string; code: string; ordinal: number }
+/**
+ * One environment an endpoint can be published in — tenant data, from the catalogue.
+ *
+ * This form used to have Production and Staging written into it, while the project form had
+ * Production and UAT. Neither could record what the other could, and because the inventory offers a
+ * domain column only for environments its data already carries, an application's UAT host was
+ * unrecordable and therefore absent from every list, filter and count (ADR-061).
+ *
+ * `lifecycleState` is `UNDECLARED` for an environment only the data carries and `DEPRECATED` for one
+ * the tenant retired. Either appears here only when this record already holds a host in it, so a
+ * value is never hidden from the form that would have to clear it.
+ */
+interface Environment { code: string; label: string; purpose: string | null; lifecycleState: string }
 interface Existing {
   id: string; name: string; owningNodeId: string | null;
   exposureDeclared: string | null; criticalityCode: string | null; criticalityInherited: boolean;
   description: string; userBase: string; features: string; tags: string;
-  productionDomain: string; stagingDomain: string; repository: string;
+  /** Hosts by environment code. Several in one environment is a real state, not a data defect. */
+  domains: Record<string, string[]>; repository: string;
   rowVersion: number; lifecycleState: string;
 }
 interface Editor {
   application: Existing | null;
-  owners: Owner[]; tiers: Tier[]; exposures: string[]; mayRetire: boolean;
+  owners: Owner[]; tiers: Tier[]; exposures: string[]; environments: Environment[];
+  mayRetire: boolean;
 }
 
 const INHERIT = "__inherit__";
@@ -54,9 +69,12 @@ export function ApplicationEditPage() {
   const [problem, setProblem] = useState<{ field?: string; message: string } | null>(null);
   const [form, setForm] = useState({
     name: "", owningNodeId: "", criticalityTierId: INHERIT, exposureDeclared: UNDECLARED,
-    description: "", userBase: "", features: "", tags: "",
-    productionDomain: "", stagingDomain: "", repository: "",
+    description: "", userBase: "", features: "", tags: "", repository: "",
   });
+  // Endpoints are held apart from the flat form because their keys are tenant data: the set of
+  // environments is not known until the editor payload arrives, so they cannot be fields of a
+  // literal. One comma-separated string per environment, which is what the input holds.
+  const [domains, setDomains] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const path = id ? `/api/ui/applications/${id}/editor` : "/api/ui/applications/editor";
@@ -74,9 +92,13 @@ export function ApplicationEditPage() {
             : (d.tiers.find((t) => t.code === a.criticalityCode)?.id ?? INHERIT),
           exposureDeclared: a.exposureDeclared ?? UNDECLARED,
           description: a.description, userBase: a.userBase, features: a.features, tags: a.tags,
-          productionDomain: a.productionDomain, stagingDomain: a.stagingDomain,
           repository: a.repository,
         });
+        const held: Record<string, string> = {};
+        Object.entries(a.domains ?? {}).forEach(([code, hosts]) => {
+          held[code] = (hosts ?? []).join(", ");
+        });
+        setDomains(held);
       }
     }).catch((e) => setError(e.message));
   }, [id]);
@@ -98,8 +120,11 @@ export function ApplicationEditPage() {
         exposureDeclared: form.exposureDeclared === UNDECLARED ? null : form.exposureDeclared,
         description: form.description, userBase: form.userBase,
         features: form.features, tags: form.tags,
-        productionDomain: form.productionDomain, stagingDomain: form.stagingDomain,
         repository: form.repository,
+        // Every environment this form rendered, including the ones left blank — a blank is how
+        // somebody clears an endpoint, and the server touches only the environments it is sent.
+        domains: Object.fromEntries((editor.environments ?? []).map(
+          (e) => [e.code, domains[e.code] ?? ""])),
       };
       if (editor.application) body.rowVersion = editor.application.rowVersion;
       const saved = await api.post<{ id: string }>(
@@ -233,16 +258,27 @@ export function ApplicationEditPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-3">
-          <Field label="Production domain">
-            <Input value={form.productionDomain}
-                   onChange={(e) => set("productionDomain", e.target.value)}
-                   placeholder="pay.example.com" />
-          </Field>
-          <Field label="Staging domain">
-            <Input value={form.stagingDomain}
-                   onChange={(e) => set("stagingDomain", e.target.value)}
-                   placeholder="pay.staging.example.com" />
-          </Field>
+          {/* One input per declared environment, from the catalogue. Retired and undeclared ones
+              appear only where this record already holds a host in them, labelled so nobody reads a
+              retired environment as a current choice. */}
+          {(editor.environments ?? []).map((environment) => (
+            <Field key={environment.code}
+                   label={`${environment.label} domain`}
+                   hint={environment.lifecycleState === "ACTIVE"
+                     ? (environment.purpose ?? undefined)
+                     : environment.lifecycleState === "DEPRECATED"
+                       ? "This environment is retired. The host recorded here is still current — "
+                         + "clear it, or restore the environment in settings."
+                       : "Recorded by an import under a name nobody declared. Declare it in "
+                         + "settings, or clear the host."}>
+              <Input value={domains[environment.code] ?? ""}
+                     onChange={(e) => {
+                       setDomains((d) => ({ ...d, [environment.code]: e.target.value }));
+                       setProblem(null);
+                     }}
+                     placeholder="pay.example.com" />
+            </Field>
+          ))}
           <Field label="Repository">
             <Input value={form.repository} onChange={(e) => set("repository", e.target.value)}
                    placeholder="group/payments-api" />

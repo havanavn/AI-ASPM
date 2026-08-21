@@ -45,6 +45,7 @@
 DO $seed$
 DECLARE
     t            uuid := '11111111-1111-1111-1111-111111111111';
+    at_domain    uuid;
     at_project   uuid;
     at_app       uuid;
     n_platform   uuid;
@@ -160,6 +161,8 @@ BEGIN
     -- hang off the application" is a fact somebody will need when they ask why a finding's path
     -- changed. The composition view walks only edges with valid_until IS NULL, so the tree is clean.
     -- ---------------------------------------------------------------------------------------------
+    SELECT id INTO at_domain FROM asset_type WHERE tenant_id = t AND code = 'DOMAIN';
+
     INSERT INTO asset_relationship (tenant_id, from_asset_id, to_asset_id, edge_type,
                                     discovery_source, attributes, valid_from)
     SELECT t, v.project, a.id, 'CONTAINS', 'MANUAL',
@@ -186,6 +189,47 @@ BEGIN
                     WHERE moved.tenant_id = t AND moved.to_asset_id = child.id
                       AND moved.edge_type = 'CONTAINS' AND moved.valid_until IS NULL
                       AND moved.from_asset_id IN (p_card, p_refunds, p_recon, p_quoting));
+
+    -- ---------------------------------------------------------------------------------------------
+    -- A project's own UAT endpoint (ADR-061, CFG-AST-002).
+    --
+    -- On a PROJECT rather than on the application above it, because that is where the question is
+    -- actually asked: an application is delivered by several teams and each team's branch has its own
+    -- pre-production host. Until the environment vocabulary became tenant data this was recordable on
+    -- a project and not on an application, and the reverse was true for staging — two hardcoded pairs
+    -- in two editors, neither able to record what the other could.
+    --
+    -- Seeded so the projects dashboard shows a populated UAT column beside the ones that have none.
+    -- Both answers matter: three of these four projects have no pre-production host recorded, which
+    -- is what the "None recorded" filter finds and what product principle 1 exists to keep visible.
+    -- ---------------------------------------------------------------------------------------------
+    INSERT INTO asset (tenant_id, type_id, identity_key, identity_rule_version, display_name,
+                       owning_node_id, criticality_mode, criticality_tier_id, exposure_declared,
+                       exposure_observed, exposure_observed_source, exposure_observed_at,
+                       lifecycle_state, tags, discovery_source, discovery_method, first_seen_at,
+                       last_confirmed_at, scope_node_id, scope_ancestor_path, scope_node_type_id,
+                       scope_criticality_id, scope_hierarchy_ver, scope_resolved_at)
+    SELECT t, at_domain, 'uat-cards.example.internal', 1, 'uat-cards.example.internal',
+           src.owning_node_id, 'INHERITED', NULL, 'INTERNAL_ONLY',
+           'INTERNAL_ONLY', 'external-scan', now(),
+           'ACTIVE', ARRAY['pre-production'], 'MANUAL', 'ONBOARDING', now() - interval '45 days',
+           now(), src.scope_node_id, src.scope_ancestor_path, src.scope_node_type_id,
+           src.scope_criticality_id, src.scope_hierarchy_ver, now()
+      FROM asset src
+     WHERE at_domain IS NOT NULL AND src.id = p_card
+       AND NOT EXISTS (SELECT 1 FROM asset a WHERE a.tenant_id = t
+                        AND a.identity_key = 'uat-cards.example.internal');
+
+    INSERT INTO asset_relationship (tenant_id, from_asset_id, to_asset_id, edge_type,
+                                    discovery_source, attributes, valid_from)
+    SELECT t, p_card, d.id, 'PUBLISHED_ON', 'MANUAL', '{"environment":"UAT"}'::jsonb, now()
+      FROM asset d
+     WHERE d.tenant_id = t AND d.identity_key = 'uat-cards.example.internal'
+       AND p_card IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM asset_relationship r
+                        WHERE r.tenant_id = t AND r.from_asset_id = p_card
+                          AND r.to_asset_id = d.id AND r.edge_type = 'PUBLISHED_ON'
+                          AND r.valid_until IS NULL);
 
     RAISE NOTICE 'projects: % assets of type PROJECT',
         (SELECT count(*) FROM asset WHERE tenant_id = t AND type_id = at_project);

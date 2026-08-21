@@ -225,6 +225,40 @@ export function RiskDistribution({ rows }: { rows: { band: string; findings: num
   );
 }
 
+/**
+ * One subtree's posture, in a table cell.
+ *
+ * **Three outcomes, not one number with two edge cases.** A score, "assessed, clear", and "not enough
+ * coverage" are three different claims, and the whole of PP-1 is that they must not be able to look
+ * like each other. A zero would collapse all three into the one reading — "fine" — which is the
+ * misreading this product exists to remove.
+ *
+ * Shared by the overview ranking and the organization tree so the same subtree cannot be described
+ * two ways on two pages. `null` renders as nothing at all: a node with no posture row is not a node
+ * with no risk, and inventing a cell for it would say otherwise.
+ */
+export function RiskCell({ row }: { row: RiskPosture | null }) {
+  if (!row || !row.scoped) {
+    return <span className="text-[11px] text-muted-foreground">—</span>;
+  }
+  if (row.posture === null) {
+    // Not a dash and not a zero. Both read as "fine"; this reads as "unknown", which is what it is,
+    // and it is the row a reader should look at hardest.
+    return <span className="text-[11px] text-muted-foreground">not enough coverage</span>;
+  }
+  if (row.findings === 0 && row.measuredAssets > 0) {
+    // Assessed and clean. The distinction PP-1 is built on: this is a different claim from the case
+    // above it, and a 0 in a risk column would make them look identical.
+    return <Badge tone="ok">assessed, clear</Badge>;
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="tabular text-xs font-semibold">{row.posture}</span>
+      <Badge tone={bandTone(row.band)}>{row.band?.toLowerCase()}</Badge>
+    </span>
+  );
+}
+
 /** Posture per organization or per application, ranked worst first. */
 export function RiskRanking({ title, rows, empty, href }: {
   title: string; rows: RiskPosture[]; empty: string; href?: (row: RiskPosture) => string;
@@ -258,22 +292,7 @@ export function RiskRanking({ title, rows, empty, href }: {
                   <Link to={href(row)} className="text-primary hover:underline">{row.name}</Link>
                 ) : row.name}
               </TableCell>
-              <TableCell className="text-right">
-                {row.posture === null ? (
-                  // Not a dash and not a zero. Both read as "fine"; this reads as "unknown", which is
-                  // what it is, and it is the row a reader should look at hardest.
-                  <span className="text-[11px] text-muted-foreground">not enough coverage</span>
-                ) : row.findings === 0 && row.measuredAssets > 0 ? (
-                  // Assessed and clean. The distinction PP-1 is built on: this is a different claim
-                  // from the row above it, and a 0 in a risk column would make them look identical.
-                  <Badge tone="ok">assessed, clear</Badge>
-                ) : (
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="tabular text-xs font-semibold">{row.posture}</span>
-                    <Badge tone={bandTone(row.band)}>{row.band?.toLowerCase()}</Badge>
-                  </span>
-                )}
-              </TableCell>
+              <TableCell className="text-right"><RiskCell row={row} /></TableCell>
               <TableCell className="tabular text-right text-xs">
                 {row.findings > 0 ? row.worstScore : "—"}
               </TableCell>

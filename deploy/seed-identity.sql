@@ -9,6 +9,32 @@
 -- =============================================================================
 \set ON_ERROR_STOP on
 
+-- ---------------------------------------------------------------------------------------------
+-- THE THREE EXAMPLE PEOPLE ARE OPT-OUT. `-v demo_people=off` skips them.
+--
+-- WHY THIS SWITCH EXISTS. `CredentialBootstrap` gives ASPM_BOOTSTRAP_PASSWORD to every principal
+-- that has no credential, so `pentester` and `developer` are not inert rows in a deployment that
+-- ran this file — they are accounts that can sign in, with a password taken from an environment
+-- variable, holding real scope over real assets. On a demo estate they are the point; on a tenant
+-- holding a company's actual attack surface they are two accounts nobody asked for.
+--
+-- Left ON by default so every existing demo flow behaves exactly as before. seed-bootstrap.sql,
+-- which is the entry point for a tenant with real data, tells you to pass `off`.
+-- ---------------------------------------------------------------------------------------------
+\if :{?demo_people}
+\else
+  \set demo_people on
+\endif
+
+-- WHICH TENANT THE ROLES AND THE POLICY GO INTO. Defaults to the demo tenant so every existing flow
+-- behaves as before; seed-bootstrap.sql passes a real one. Without this the permission catalogue
+-- (product-fixed, tenant-independent) would land correctly and the ROLES — which are tenant data —
+-- would land in a tenant nobody is serving.
+\if :{?tenant_id}
+\else
+  \set tenant_id '11111111-1111-1111-1111-111111111111'
+\endif
+
 INSERT INTO permission_catalogue (code, domain, label_i18n, is_restricted, requires_step_up) VALUES
   ('org.node.read',       'ORG', '{"en":"Read organization nodes"}',        false, false),
   ('org.node.create',     'ORG', '{"en":"Create organization nodes"}',      false, false),
@@ -45,9 +71,18 @@ INSERT INTO permission_catalogue (code, domain, label_i18n, is_restricted, requi
   ('auz.role.manage',     'AUZ', '{"en":"Manage roles and assignments"}',   false, true)
 ON CONFLICT (code) DO NOTHING;
 
+-- psql does NOT substitute :variables inside a dollar-quoted block, so they are carried in as
+-- session settings the block reads at run time. Substituting them textually would also mean a value
+-- containing a quote became SQL, which is the injection this avoids by construction.
+SELECT set_config('aspm.seed_tenant', :'tenant_id', false);
+SELECT set_config('aspm.seed_demo_people', :'demo_people', false);
+
 DO $seed$
 DECLARE
-    t        uuid := '11111111-1111-1111-1111-111111111111';
+    t        uuid := current_setting('aspm.seed_tenant')::uuid;
+    -- Only reached under demo_people; these are the demo estate's own node identifiers.
+    demo_people boolean := current_setting('aspm.seed_demo_people')
+                           IN ('on', 'true', 'yes', '1');
     n_root   uuid := 'aaaaaaaa-1111-4000-8000-00000000000a';
     n_bank   uuid := '30000000-0000-4000-8000-000000000001';
     n_pay_api uuid := '30000000-0000-4000-8000-000000000003';
@@ -158,28 +193,37 @@ BEGIN
 
     -- ---- Principals. No credential here: it is set by the application so Argon2id runs where its
     -- parameters live, rather than being reproduced in SQL where they would drift.
-    INSERT INTO principal (id, tenant_id, kind, username, email, display_name, lifecycle_state,
-                           must_change_password)
-    VALUES (admin_id, t, 'HUMAN', 'admin', 'admin@example.com', 'Platform Administrator', 'ACTIVE',
-            false),
-           (pt_id, t, 'HUMAN', 'pentester', 'pentester@example.com', 'Nguyen Van A', 'ACTIVE', false),
-           (dev_id, t, 'HUMAN', 'developer', 'developer@example.com', 'Tran Thi B', 'ACTIVE', false)
-    ON CONFLICT DO NOTHING;
+    --
+    -- Skipped entirely with -v demo_people=off. Each of these can SIGN IN once the credential
+    -- bootstrap runs, so on a tenant holding real data they are three unrequested accounts.
+    IF demo_people THEN
+        INSERT INTO principal (id, tenant_id, kind, username, email, display_name, lifecycle_state,
+                               must_change_password)
+        VALUES (admin_id, t, 'HUMAN', 'admin', 'admin@example.com', 'Platform Administrator',
+                'ACTIVE', false),
+               (pt_id, t, 'HUMAN', 'pentester', 'pentester@example.com', 'Nguyen Van A', 'ACTIVE',
+                false),
+               (dev_id, t, 'HUMAN', 'developer', 'developer@example.com', 'Tran Thi B', 'ACTIVE',
+                false)
+        ON CONFLICT DO NOTHING;
+    END IF;
 
     -- ---- Assignments, each with its scope. A role without a scope is a role over everything. ----
-    INSERT INTO role_assignment (tenant_id, principal_id, role_id, scope_node_id, scope_mode)
-    SELECT t, admin_id, id, NULL, 'TENANT' FROM role WHERE tenant_id = t AND code = 'ADMIN'
-    ON CONFLICT DO NOTHING;
+    IF demo_people THEN
+        INSERT INTO role_assignment (tenant_id, principal_id, role_id, scope_node_id, scope_mode)
+        SELECT t, admin_id, id, NULL, 'TENANT' FROM role WHERE tenant_id = t AND code = 'ADMIN'
+        ON CONFLICT DO NOTHING;
 
-    INSERT INTO role_assignment (tenant_id, principal_id, role_id, scope_node_id, scope_mode)
-    SELECT t, pt_id, id, n_root, 'SUBTREE' FROM role WHERE tenant_id = t AND code = 'PENTESTER'
-    ON CONFLICT DO NOTHING;
+        INSERT INTO role_assignment (tenant_id, principal_id, role_id, scope_node_id, scope_mode)
+        SELECT t, pt_id, id, n_root, 'SUBTREE' FROM role WHERE tenant_id = t AND code = 'PENTESTER'
+        ON CONFLICT DO NOTHING;
 
-    -- The developer reaches one project, not the business unit. This is the assignment that makes the
-    -- scope filtering on every page observable rather than theoretical.
-    INSERT INTO role_assignment (tenant_id, principal_id, role_id, scope_node_id, scope_mode)
-    SELECT t, dev_id, id, n_pay_api, 'SUBTREE' FROM role WHERE tenant_id = t AND code = 'DEVELOPER'
-    ON CONFLICT DO NOTHING;
+        -- The developer reaches one project, not the business unit. This is the assignment that makes
+        -- the scope filtering on every page observable rather than theoretical.
+        INSERT INTO role_assignment (tenant_id, principal_id, role_id, scope_node_id, scope_mode)
+        SELECT t, dev_id, id, n_pay_api, 'SUBTREE' FROM role WHERE tenant_id = t AND code = 'DEVELOPER'
+        ON CONFLICT DO NOTHING;
+    END IF;
 
     RAISE NOTICE 'identity seeded: % permissions, % roles, % principals, % assignments',
         (SELECT count(*) FROM permission_catalogue),

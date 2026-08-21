@@ -351,8 +351,37 @@ public final class RiskScoring {
 
     /** Posture per organization the caller reaches. The "Risk by Business Unit" question. */
     public List<Posture> organizationPosture(Principal principal) throws SQLException {
-        return posture(principal, SCORED
-                + ", roots AS (SELECT id, name FROM org_node WHERE id = ANY (?)), "
+        return posture(principal, subtreePosture(
+                "roots AS (SELECT id, name FROM org_node WHERE id = ANY (?)), "));
+    }
+
+    /**
+     * The same posture, for <b>every node the caller can reach</b> rather than for their scope roots.
+     *
+     * <p>The organization tree is where somebody asks "which part of this is the problem", and a
+     * score that exists only at the top cannot answer it. Each row scores its own whole subtree, so a
+     * parent's figure is not the sum or the mean of the rows drawn under it — DOC-28 §10.1 rejects
+     * both, and re-deriving a parent from its children here would reintroduce exactly the summation
+     * the model refuses.
+     *
+     * <p>{@link Posture#presentable()} is false wherever the coverage is too thin to show a number.
+     * Those rows must be rendered as a coverage gap ({@code PRD-RSK-027}); a tree of confident-looking
+     * scores over unmeasured estate is the misreading this whole model exists to prevent.
+     */
+    public List<Posture> nodePosture(Principal principal) throws SQLException {
+        return posture(principal, subtreePosture(
+                "roots AS (SELECT id, name FROM org_node "
+                        + "         WHERE id IN (SELECT descendant_id FROM org_closure "
+                        + "                       WHERE ancestor_id = ANY (?))), "));
+    }
+
+    /**
+     * @param roots the {@code roots AS (…),} clause, binding exactly one scope array. Everything
+     *     after it is shared, because the two callers differ only in which nodes get a row
+     */
+    private static String subtreePosture(String roots) {
+        return SCORED
+                + ", " + roots
                 + "  sub AS (SELECT r.id AS root_id, r.name, c.descendant_id "
                 + "            FROM roots r JOIN org_closure c ON c.ancestor_id = r.id) "
                 + "SELECT r.id::text, r.name, "
@@ -373,7 +402,7 @@ public final class RiskScoring {
                 + "  (SELECT count(*) FROM scored s "
                 + "    WHERE s.first_detected_at > now() - interval '90 days' "
                 + "      AND s.scope_node_id IN (SELECT descendant_id FROM sub WHERE root_id = r.id)) "
-                + "  FROM roots r ORDER BY r.name");
+                + "  FROM roots r ORDER BY r.name";
     }
 
     /**

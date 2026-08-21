@@ -58,6 +58,7 @@ public final class EditorApi {
     // Built once. The finding form reads three taxonomies and the submit path writes one, so a
     // per-request instance would be two constructions on the hottest write in the product.
     private final aspm.app.resource.FindingClassifier classifier;
+    private final aspm.app.inventory.ProjectQuery projects;
     private final UUID tenantId;
 
     public EditorApi(DataSource dataSource, UUID tenantId) {
@@ -66,6 +67,7 @@ public final class EditorApi {
         this.accounts = new AccountService(dataSource);
         this.assessments = new aspm.app.assessment.AssessmentService(dataSource);
         this.classifier = new aspm.app.resource.FindingClassifier(dataSource);
+        this.projects = new aspm.app.inventory.ProjectQuery(dataSource);
         this.tenantId = Objects.requireNonNull(tenantId, "a tenant is required");
     }
 
@@ -89,6 +91,10 @@ public final class EditorApi {
         }
 
         Map<String, Object> body = new LinkedHashMap<>();
+        // Declared out here so the environment list below can be widened by what this record already
+        // holds. An environment retired while a host was still recorded against it must still appear
+        // in the form, or the value is invisible and nobody can clear it.
+        Map<String, List<String>> domains = new java.util.LinkedHashMap<>();
         if (id != null) {
             Optional<InventoryService.Application> found = inventory.application(principal, id);
             if (found.isEmpty()) {
@@ -111,8 +117,8 @@ public final class EditorApi {
             entry.put("userBase", app.userBase());
             entry.put("features", String.join(", ", app.features()));
             entry.put("tags", String.join(", ", app.tags()));
-            entry.put("productionDomain", endpointOf(related, "PRODUCTION"));
-            entry.put("stagingDomain", endpointOf(related, "STAGING"));
+            domains.putAll(domainsOf(related));
+            entry.put("domains", domains);
             entry.put("repository", repositoryOf(related));
             entry.put("rowVersion", app.rowVersion());
             entry.put("lifecycleState", app.lifecycleState());
@@ -140,6 +146,12 @@ public final class EditorApi {
         // to change it when it becomes configurable.
         body.put("exposures", List.of("INTERNET_PUBLIC", "PARTNER_B2B", "INTERNAL_ONLY",
                 "AIR_GAPPED"));
+        // The environments this form offers a domain input for. Tenant data (V069): this form used to
+        // have Production and Staging compiled into it while the project form had Production and UAT,
+        // so neither could record what the other could and an application's UAT host was
+        // unrecordable — and therefore absent from every column, filter and count.
+        body.put("environments", environmentsFor(inventory.endpointEnvironments(principal),
+                domains.keySet()));
         body.put("mayRetire", principal != null && principal.holds(ApplicationPages.UPDATE));
         return json(body);
     }
@@ -187,15 +199,525 @@ public final class EditorApi {
                             + "rather than overwritten");
         }
 
+        // Endpoints, by environment. Validated against the tenant's catalogue rather than trusted:
+        // the map keys become the environment recorded on an edge, and a caller who edited the
+        // payload could otherwise write a vocabulary nobody declared — which the interface would then
+        // show as a column, indistinguishable from one somebody agreed to.
+        Map<String, List<String>> domains;
+        try {
+            domains = submittedDomains(payload.get("domains"),
+                    inventory.endpointEnvironments(principal));
+        } catch (IllegalArgumentException e) {
+            return rejected("ENVIRONMENT_UNKNOWN", "domains", e.getMessage());
+        }
+
         var draft = new InventoryService.ApplicationDraft(id, name, node, criticality,
                 text(payload.get("exposureDeclared")), text(payload.get("description")),
                 text(payload.get("userBase")), text(payload.get("features")),
-                text(payload.get("tags")), text(payload.get("productionDomain")),
-                text(payload.get("stagingDomain")), text(payload.get("repository")), rowVersion);
+                text(payload.get("tags")), domains, text(payload.get("repository")), rowVersion);
 
         Optional<UUID> saved = inventory.saveApplication(principal, draft);
         if (saved.isEmpty()) {
             return stale("somebody else changed this application while you were editing it. "
+                    + "Reload to see their version before saving yours.");
+        }
+        return json(Map.of("id", saved.orElseThrow().toString()));
+    }
+
+    // ==============================================================================================
+    // The declared-field catalogue
+    // ==============================================================================================
+
+    /**
+     * {@code GET /api/ui/settings/fields}.
+     *
+     * <p>Every asset type and, for the one asked about, every field declared on it — DEPRECATED ones
+     * included. An administrator who cannot see a retired field cannot restore it, and will instead
+     * declare a second field with a different key meaning the same thing; two keys for one fact is
+     * exactly what a catalogue exists to prevent.
+     */
+    public Dispatcher.Response fieldCatalogue(Dispatcher.Request request) throws Exception {
+        Principal principal = request.principal();
+        List<InventoryService.AssetTypeRow> types = inventory.assetTypes(principal);
+        String typeCode = request.query().get("type");
+        if (typeCode == null || typeCode.isBlank()) {
+            typeCode = types.isEmpty() ? "" : types.get(0).code();
+        }
+        final String selected = typeCode;
+        // A type the tenant does not have is not an error page. A stale bookmark should show the
+        // catalogue, not a dead end.
+        boolean known = types.stream().anyMatch(t -> t.code().equals(selected));
+        List<InventoryService.AttributeDefinition> fields =
+                known ? inventory.allDefinitions(principal, selected) : List.of();
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("types", types.stream().map(t -> Map.of(
+                "code", t.code(), "ordinal", t.ordinal(), "fieldCount", t.fieldCount())).toList());
+        body.put("selectedType", known ? selected : "");
+        body.put("dataTypes", InventoryService.DATA_TYPES);
+        body.put("fields", fields.stream().map(EditorApi::catalogueEntry).toList());
+        // Which permitted values are actually recorded, per select field. The editor greys the
+        // removal of a value rows are holding, and says how many hold it — a refusal at save time
+        // with no warning beforehand is the same information delivered too late to act on.
+        Map<String, Object> inUse = new LinkedHashMap<>();
+        if (known) {
+            for (InventoryService.AttributeDefinition field : fields) {
+                if (field.isSelect()) {
+                    inUse.put(field.key(),
+                            List.copyOf(inventory.valuesInUse(principal, selected, field.key())));
+                }
+            }
+        }
+        body.put("valuesInUse", inUse);
+        body.put("mayManage", principal != null && principal.holds(InventoryService.FIELD_ADMIN));
+        return json(body);
+    }
+
+    private static Map<String, Object> catalogueEntry(InventoryService.AttributeDefinition d) {
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("id", d.id().toString());
+        entry.put("key", d.key());
+        entry.put("label", d.label());
+        entry.put("labelVi", d.labelVi());
+        entry.put("dataType", d.dataType());
+        entry.put("permittedValues", d.permittedValues());
+        entry.put("filterable", d.filterable());
+        entry.put("required", d.required());
+        entry.put("purpose", d.purpose());
+        entry.put("ordinal", d.ordinal());
+        entry.put("lifecycleState", d.lifecycleState());
+        entry.put("rowVersion", d.rowVersion());
+        return entry;
+    }
+
+    /** {@code POST /api/ui/settings/fields} — declare a new one. */
+    public Dispatcher.Response fieldCreate(Dispatcher.Request request) throws Exception {
+        Principal principal = request.principal();
+        Map<String, Object> payload = request.body().orElse(Map.of());
+        String typeCode = text(payload.get("assetType"));
+        if (typeCode == null || typeCode.isBlank()) {
+            return rejected("TYPE_REQUIRED", "assetType", "choose the asset type this field is for");
+        }
+        try {
+            Optional<UUID> created = inventory.createDefinition(principal, typeCode,
+                    text(payload.get("key")), text(payload.get("label")),
+                    text(payload.get("labelVi")), text(payload.get("dataType")),
+                    stringList(payload.get("permittedValues")),
+                    Boolean.TRUE.equals(payload.get("filterable")),
+                    Boolean.TRUE.equals(payload.get("required")),
+                    text(payload.get("purpose")));
+            if (created.isEmpty()) {
+                return rejected("KEY_TAKEN", "key",
+                        "that key is already declared on this type. Restore the existing field "
+                                + "rather than declaring a second one for the same fact");
+            }
+            return json(Map.of("id", created.orElseThrow().toString()));
+        } catch (IllegalArgumentException e) {
+            return rejected("INVALID", "key", e.getMessage());
+        }
+    }
+
+    /** {@code POST /api/ui/settings/fields/{id}} — amend one. */
+    public Dispatcher.Response fieldUpdate(Dispatcher.Request request) throws Exception {
+        Principal principal = request.principal();
+        UUID id = uuid(request.pathVariables().get("id"));
+        Map<String, Object> payload = request.body().orElse(Map.of());
+        String typeCode = text(payload.get("assetType"));
+        Integer rowVersion = integer(payload.get("rowVersion"));
+        if (id == null || typeCode == null || typeCode.isBlank()) {
+            return Dispatcher.Response.notFound();
+        }
+        if (rowVersion == null) {
+            return rejected("ROW_VERSION_REQUIRED", "rowVersion",
+                    "the editor must send the version it loaded");
+        }
+        Optional<InventoryService.AttributeDefinition> existing =
+                inventory.allDefinitions(principal, typeCode).stream()
+                        .filter(d -> d.id().equals(id)).findFirst();
+        if (existing.isEmpty()) {
+            return Dispatcher.Response.notFound();
+        }
+        InventoryService.AttributeDefinition field = existing.orElseThrow();
+        List<String> wanted = stringList(payload.get("permittedValues"));
+
+        // Removing a value that assets are holding is refused, and every offending value is named.
+        // Removal does not delete those values — they stay in `attributes` and would render as a
+        // value nobody declared, filterable by nothing and explicable by no one.
+        if (field.isSelect()) {
+            java.util.Set<String> used = inventory.valuesInUse(principal, typeCode, field.key());
+            List<String> orphaned = field.permittedValues().stream()
+                    .filter(used::contains).filter(v -> !wanted.contains(v)).toList();
+            if (!orphaned.isEmpty()) {
+                return new Dispatcher.Response(400, Map.of(
+                        "code", "VALUE_IN_USE", "field", "permittedValues",
+                        "message", "still recorded on assets: " + String.join(", ", orphaned)
+                                + ". Removing a value does not remove it from the records holding "
+                                + "it — change those first, or leave the value declared.",
+                        "values", orphaned), Map.of());
+            }
+        }
+        try {
+            boolean applied = inventory.updateDefinition(principal, id, text(payload.get("label")),
+                    text(payload.get("labelVi")), wanted,
+                    Boolean.TRUE.equals(payload.get("filterable")),
+                    Boolean.TRUE.equals(payload.get("required")),
+                    text(payload.get("purpose")), rowVersion.intValue());
+            return applied ? json(Map.of("id", id.toString()))
+                    : stale("somebody else changed this field while you were editing it.");
+        } catch (java.sql.SQLException e) {
+            // The CHECK that forbids a select type with no options. Reported as the sentence it is
+            // rather than as a constraint name nobody outside this file can read.
+            return rejected("NO_OPTIONS", "permittedValues",
+                    "a dropdown with no options is a field nobody can complete");
+        }
+    }
+
+    /** {@code POST /api/ui/settings/fields/{id}/lifecycle} — retire one, or bring it back. */
+    public Dispatcher.Response fieldLifecycle(Dispatcher.Request request) throws Exception {
+        Principal principal = request.principal();
+        UUID id = uuid(request.pathVariables().get("id"));
+        Map<String, Object> payload = request.body().orElse(Map.of());
+        Integer rowVersion = integer(payload.get("rowVersion"));
+        if (id == null || rowVersion == null) {
+            return Dispatcher.Response.notFound();
+        }
+        boolean active = Boolean.TRUE.equals(payload.get("active"));
+        boolean applied = inventory.setDefinitionLifecycle(principal, id, active,
+                rowVersion.intValue());
+        return applied ? json(Map.of("id", id.toString()))
+                : stale("somebody else changed this field while you were editing it.");
+    }
+
+    /** {@code POST /api/ui/settings/fields/{id}/move} — reorder within the type. */
+    public Dispatcher.Response fieldMove(Dispatcher.Request request) throws Exception {
+        Principal principal = request.principal();
+        UUID id = uuid(request.pathVariables().get("id"));
+        Map<String, Object> payload = request.body().orElse(Map.of());
+        Integer delta = integer(payload.get("delta"));
+        if (id == null || delta == null || delta.intValue() == 0) {
+            return Dispatcher.Response.notFound();
+        }
+        boolean applied = inventory.reorderDefinition(principal, id,
+                delta.intValue() > 0 ? 1 : -1);
+        return applied ? json(Map.of("id", id.toString())) : Dispatcher.Response.notFound();
+    }
+
+    // ==============================================================================================
+    // The endpoint environment catalogue
+    // ==============================================================================================
+
+    /**
+     * {@code GET /api/ui/settings/environments}.
+     *
+     * <p>Every environment, in all three states, with how many endpoints each currently holds. The
+     * count is not decoration: retiring an environment removes it from both editors and leaves every
+     * edge published in it exactly where it was, so an administrator needs to know that forty hosts
+     * are about to become unmaintainable from any form before pressing the button rather than after.
+     *
+     * <p>Undeclared environments are listed too, marked as such. They are the ones an importer wrote,
+     * and the useful action on them is to declare them — which cannot be offered by a screen that
+     * does not admit they exist.
+     */
+    public Dispatcher.Response environmentCatalogue(Dispatcher.Request request) throws Exception {
+        Principal principal = request.principal();
+        // *** THE ENDPOINT COUNT IS BEHIND THE MANAGE PERMISSION, AND THAT IS A CORRECTION. ***
+        //
+        // It was returned to anybody holding ast.asset.read. The count is TENANT-WIDE and carries no
+        // scope predicate — it cannot have one, because "how many endpoints does retiring this
+        // environment affect" is a question about the whole tenant — so a reader whose scope is one
+        // team could read how many endpoints exist in each environment across every team. A count is
+        // not an identity, but it is an aggregate that ignores scope, and DOC-24 names aggregates as
+        // one of the surfaces object-level authorization leaks through (SEC-AUZ-016, product
+        // principle 4).
+        //
+        // Gated rather than scoped: the number exists to inform an administrative decision, and a
+        // scoped version of it would answer a different question while looking like the same one.
+        boolean mayManage = principal != null && principal.holds(InventoryService.FIELD_ADMIN);
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (InventoryService.EndpointEnvironment environment
+                : inventory.endpointEnvironments(principal)) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("id", environment.id() == null ? null : environment.id().toString());
+            entry.put("code", environment.code());
+            entry.put("label", environment.label());
+            entry.put("labelVi", environment.labelVi());
+            entry.put("purpose", environment.purpose());
+            entry.put("ordinal", environment.ordinal());
+            entry.put("lifecycleState", environment.lifecycleState());
+            entry.put("declared", environment.declared());
+            entry.put("rowVersion", environment.rowVersion());
+            // Absent, not zero. A zero would read as "nothing is published here", which is a fact
+            // about the estate; absence says the caller was not told (product principle 1).
+            entry.put("endpointCount", mayManage
+                    ? Long.valueOf(inventory.endpointsInEnvironment(principal, environment.code()))
+                    : null);
+            rows.add(entry);
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("environments", rows);
+        // The same permission the declared-field catalogue uses, and deliberately not a second one:
+        // deciding that the inventory asks "which host serves this in UAT" is the same decision, by
+        // the same people, as deciding it asks "which CDN is in front of it" (V069).
+        body.put("mayManage", mayManage);
+        return json(body);
+    }
+
+    /** {@code POST /api/ui/settings/environments} — declare one. */
+    public Dispatcher.Response environmentCreate(Dispatcher.Request request) throws Exception {
+        Principal principal = request.principal();
+        Map<String, Object> payload = request.body().orElse(Map.of());
+        try {
+            Optional<UUID> created = inventory.createEnvironment(principal,
+                    text(payload.get("code")), text(payload.get("label")),
+                    text(payload.get("labelVi")), text(payload.get("purpose")));
+            if (created.isEmpty()) {
+                return rejected("CODE_TAKEN", "code",
+                        "that environment is already declared. Restore the existing one rather than "
+                                + "declaring a second row for the same environment — the edges "
+                                + "recorded under it would answer to whichever row somebody read.");
+            }
+            return json(Map.of("id", created.orElseThrow().toString()));
+        } catch (IllegalArgumentException e) {
+            return rejected("INVALID", "code", e.getMessage());
+        }
+    }
+
+    /** {@code POST /api/ui/settings/environments/{id}} — relabel or restate one. */
+    public Dispatcher.Response environmentUpdate(Dispatcher.Request request) throws Exception {
+        Principal principal = request.principal();
+        UUID id = uuid(request.pathVariables().get("id"));
+        Map<String, Object> payload = request.body().orElse(Map.of());
+        Integer rowVersion = integer(payload.get("rowVersion"));
+        if (id == null) {
+            return Dispatcher.Response.notFound();
+        }
+        if (rowVersion == null) {
+            return rejected("ROW_VERSION_REQUIRED", "rowVersion",
+                    "the editor must send the version it loaded");
+        }
+        boolean applied = inventory.updateEnvironment(principal, id, text(payload.get("label")),
+                text(payload.get("labelVi")), text(payload.get("purpose")), rowVersion.intValue());
+        return applied ? json(Map.of("id", id.toString()))
+                : stale("somebody else changed this environment while you were editing it.");
+    }
+
+    /** {@code POST /api/ui/settings/environments/{id}/lifecycle} — retire one, or restore it. */
+    public Dispatcher.Response environmentLifecycle(Dispatcher.Request request) throws Exception {
+        Principal principal = request.principal();
+        UUID id = uuid(request.pathVariables().get("id"));
+        Map<String, Object> payload = request.body().orElse(Map.of());
+        Integer rowVersion = integer(payload.get("rowVersion"));
+        if (id == null || rowVersion == null) {
+            return Dispatcher.Response.notFound();
+        }
+        boolean active = Boolean.TRUE.equals(payload.get("active"));
+        boolean applied = inventory.setEnvironmentLifecycle(principal, id, active,
+                rowVersion.intValue());
+        return applied ? json(Map.of("id", id.toString()))
+                : stale("somebody else changed this environment while you were editing it.");
+    }
+
+    /** {@code POST /api/ui/settings/environments/{id}/move} — reorder. */
+    public Dispatcher.Response environmentMove(Dispatcher.Request request) throws Exception {
+        Principal principal = request.principal();
+        UUID id = uuid(request.pathVariables().get("id"));
+        Map<String, Object> payload = request.body().orElse(Map.of());
+        Integer delta = integer(payload.get("delta"));
+        if (id == null || delta == null || delta.intValue() == 0) {
+            return Dispatcher.Response.notFound();
+        }
+        boolean applied = inventory.reorderEnvironment(principal, id,
+                delta.intValue() > 0 ? 1 : -1);
+        return applied ? json(Map.of("id", id.toString())) : Dispatcher.Response.notFound();
+    }
+
+    /** A JSON array of strings, from a payload that may send anything. */
+    private static List<String> stringList(Object raw) {
+        if (!(raw instanceof List<?> list)) {
+            return List.of();
+        }
+        List<String> out = new java.util.ArrayList<>();
+        for (Object item : list) {
+            if (item != null && !String.valueOf(item).strip().isEmpty()) {
+                out.add(String.valueOf(item).strip());
+            }
+        }
+        return List.copyOf(out);
+    }
+
+    // ==============================================================================================
+    // Projects
+    // ==============================================================================================
+
+    /**
+     * {@code GET /api/ui/projects/{id}/editor}.
+     *
+     * <p>The project, the tenant's declared field catalogue for {@code PROJECT}, and every option list
+     * the form needs, in one response. The catalogue is sent rather than compiled into the client
+     * because it is <b>tenant data</b> (ADR-027): another deployment declares different fields with
+     * different permitted values, and a dropdown hard-coded in the React bundle would make that a
+     * release rather than an INSERT.
+     */
+    public Dispatcher.Response projectEditor(Dispatcher.Request request) throws Exception {
+        Principal principal = request.principal();
+        UUID id = uuid(request.pathVariables().get("id"));
+        if (id == null) {
+            return Dispatcher.Response.notFound();
+        }
+        Optional<aspm.app.inventory.ProjectQuery.Project> found = projects.project(principal, id);
+        if (found.isEmpty()) {
+            return Dispatcher.Response.notFound();
+        }
+        aspm.app.inventory.ProjectQuery.Project project = found.orElseThrow();
+        List<InventoryService.Related> related = inventory.related(principal, id);
+
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("id", project.id().toString());
+        entry.put("name", project.name());
+        entry.put("applicationName", project.applicationName());
+        entry.put("owningNodeName", project.owningNodeName());
+        entry.put("exposureDeclared", project.exposureDeclared());
+        entry.put("criticalityCode", project.criticalityCode());
+        // The distinction the form needs to render "inherited" as a state rather than as a value
+        // somebody appears to have chosen. Re-saving an inherited tier as an assigned one is a change
+        // nobody intended to make and nothing would ever flag.
+        entry.put("criticalityInherited", project.criticalityInherited());
+        entry.put("technicalContactId", project.technicalContactId() == null
+                ? null : project.technicalContactId().toString());
+        entry.put("technicalContactName", project.technicalContactName());
+        entry.put("attributes", project.attributes());
+        Map<String, List<String>> domains = domainsOf(related);
+        entry.put("domains", domains);
+        entry.put("repository", repositoryOf(related));
+        entry.put("repositoryBranch", branchOf(related));
+        entry.put("rowVersion", project.rowVersion());
+        entry.put("lifecycleState", project.lifecycleState());
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("project", entry);
+        body.put("fields", inventory.attributeDefinitions(principal,
+                aspm.app.inventory.ProjectQuery.PROJECT_TYPE).stream()
+                .map(EditorApi::fieldOf).toList());
+        body.put("tiers", inventory.tiers(principal).stream()
+                .map(t -> Map.of("id", t.id().toString(), "code", t.code(),
+                        "ordinal", t.ordinal())).toList());
+        // A check constraint today, so it is listed here rather than typed into the React bundle —
+        // one place to change it when it becomes configurable. `access_path` is a DECLARED attribute
+        // and arrives in `fields` instead; the two answer different questions and are kept apart on
+        // purpose (see the PROJECT catalogue seed).
+        body.put("exposures", List.of("INTERNET_PUBLIC", "PARTNER_B2B", "INTERNAL_ONLY",
+                "AIR_GAPPED"));
+        // The same environment catalogue the application editor renders, from the same read (V069).
+        // Two forms with two hardcoded pairs is what this replaces.
+        body.put("environments", environmentsFor(inventory.endpointEnvironments(principal),
+                domains.keySet()));
+        body.put("people", assessments.assignableprincipals(principal));
+        return json(body);
+    }
+
+    /** One declared field, as the editor needs it. */
+    private static Map<String, Object> fieldOf(InventoryService.AttributeDefinition definition) {
+        Map<String, Object> field = new LinkedHashMap<>();
+        field.put("key", definition.key());
+        field.put("label", definition.label());
+        field.put("dataType", definition.dataType());
+        field.put("permittedValues", definition.permittedValues());
+        field.put("required", definition.required());
+        field.put("filterable", definition.filterable());
+        // Rendered beside the field. A field whose purpose nobody can state is a field people fill in
+        // wrongly and then filter on, which is worse than leaving it empty.
+        field.put("purpose", definition.purpose());
+        return field;
+    }
+
+    /**
+     * {@code POST /api/ui/projects/{id}/editor}.
+     *
+     * <p>Every value is re-checked against the catalogue here, not only in the dropdown that produced
+     * it. The form is on the client and the client belongs to the caller: until
+     * {@link InventoryService#attributeViolations} existed, a posted
+     * {@code {"waf":"whatever"}} was stored verbatim and every filter built on that field acquired a
+     * value nobody declared.
+     */
+    public Dispatcher.Response projectSave(Dispatcher.Request request) throws Exception {
+        Principal principal = request.principal();
+        UUID id = uuid(request.pathVariables().get("id"));
+        if (id == null) {
+            return Dispatcher.Response.notFound();
+        }
+        // Re-read through the scoped query before writing through the identifier. Authorizing the path
+        // and then acting on what the body names is the defect class this product exists to find in
+        // other people's software (SEC-AUZ-017).
+        Optional<aspm.app.inventory.ProjectQuery.Project> found = projects.project(principal, id);
+        if (found.isEmpty()) {
+            return Dispatcher.Response.notFound();
+        }
+
+        Map<String, Object> payload = request.body().orElse(Map.of());
+        String name = text(payload.get("name"));
+        name = name == null ? "" : name.strip();
+        if (name.isEmpty()) {
+            return rejected("NAME_REQUIRED", "name", "a project needs a name");
+        }
+        Integer rowVersion = integer(payload.get("rowVersion"));
+        if (rowVersion == null) {
+            return rejected("ROW_VERSION_REQUIRED", "rowVersion",
+                    "the editor must send the version it loaded, so a concurrent edit is refused "
+                            + "rather than overwritten");
+        }
+
+        // The named contact must be somebody this caller could assign. Re-checked rather than trusted
+        // from the picker: product principle 4 — a filtered picker is a usability feature and never an
+        // authorization control.
+        UUID contact = uuid(text(payload.get("technicalContactId")));
+        if (contact != null) {
+            boolean assignable = assessments.assignableprincipals(principal).stream()
+                    .anyMatch(person -> contact.toString().equals(person.get("id")));
+            if (!assignable) {
+                return rejected("CONTACT_UNKNOWN", "technicalContactId",
+                        "that person is not one you can name as a contact");
+            }
+        }
+
+        List<InventoryService.AttributeDefinition> definitions = inventory.attributeDefinitions(
+                principal, aspm.app.inventory.ProjectQuery.PROJECT_TYPE);
+        Object raw = payload.get("attributes");
+        Map<String, Object> submitted = raw instanceof Map<?, ?> map
+                ? map.entrySet().stream().collect(LinkedHashMap::new,
+                        (into, e) -> into.put(String.valueOf(e.getKey()), e.getValue()),
+                        LinkedHashMap::putAll)
+                : Map.of();
+        Map<String, Object> attributes = inventory.attributeDocumentFrom(definitions, submitted);
+        List<InventoryService.AttributeViolation> problems =
+                inventory.attributeViolations(definitions, attributes);
+        if (!problems.isEmpty()) {
+            InventoryService.AttributeViolation first = problems.get(0);
+            // The first violation drives focus; all of them are returned, because a form that reports
+            // one error per round trip teaches people to stop reading the message.
+            return new Dispatcher.Response(400, Map.of(
+                    "code", first.code(), "field", first.key(), "message", first.message(),
+                    "violations", problems.stream().map(v -> Map.of(
+                            "field", v.key(), "code", v.code(), "message", v.message())).toList()),
+                    Map.of());
+        }
+
+        Map<String, List<String>> domains;
+        try {
+            domains = submittedDomains(payload.get("domains"),
+                    inventory.endpointEnvironments(principal));
+        } catch (IllegalArgumentException e) {
+            return rejected("ENVIRONMENT_UNKNOWN", "domains", e.getMessage());
+        }
+
+        var draft = new InventoryService.ProjectDraft(id, name,
+                found.orElseThrow().owningNodeId(), uuid(text(payload.get("criticalityTierId"))),
+                text(payload.get("exposureDeclared")), contact, attributes, domains,
+                text(payload.get("repository")), text(payload.get("repositoryBranch")),
+                rowVersion);
+
+        Optional<UUID> saved = inventory.saveProject(principal, draft);
+        if (saved.isEmpty()) {
+            return stale("somebody else changed this project while you were editing it. "
                     + "Reload to see their version before saving yours.");
         }
         return json(Map.of("id", saved.orElseThrow().toString()));
@@ -629,15 +1151,150 @@ public final class EditorApi {
         return codes;
     }
 
-    private static String endpointOf(List<InventoryService.Related> related, String environment) {
-        return related.stream()
-                .filter(r -> "DOMAIN".equals(r.typeCode()) && environment.equals(r.environment()))
-                .map(InventoryService.Related::name).findFirst().orElse("");
+    /**
+     * The hosts one record is published on, grouped by environment.
+     *
+     * <p><b>*** THIS REPLACES A `findFirst()`, AND THAT WAS A DEFECT. ***</b> The editors read one
+     * host per environment. A project published on two hosts in one environment showed the first, and
+     * saving the form closed the edge to the second — silently, because the form never displayed it.
+     * The value was in the column on the list page the whole time, which is where somebody would have
+     * had to notice the discrepancy.
+     *
+     * <p>An edge carrying no environment lands under {@code UNSPECIFIED}, the same substitute the
+     * inventory columns use. It is deliberately not a catalogue row: it is the absence of an answer,
+     * not a name anybody chose, so the form shows it and no form offers it as a new choice.
+     */
+    private static Map<String, List<String>> domainsOf(List<InventoryService.Related> related) {
+        Map<String, List<String>> domains = new LinkedHashMap<>();
+        for (InventoryService.Related row : related) {
+            if (!"DOMAIN".equals(row.typeCode())) {
+                continue;
+            }
+            String environment = row.environment() == null || row.environment().isBlank()
+                    ? "UNSPECIFIED" : row.environment();
+            domains.computeIfAbsent(environment, key -> new ArrayList<>()).add(row.name());
+        }
+        domains.values().forEach(java.util.Collections::sort);
+        return domains;
+    }
+
+    /**
+     * The environments a form offers a domain input for.
+     *
+     * <p>Active catalogue rows, plus any environment this record already holds a host in even where
+     * that environment is retired or was never declared. The second half is what keeps a recorded
+     * value visible: an environment dropped from the catalogue while a host was published in it would
+     * otherwise vanish from the form, leaving a value on the list page that no form could correct.
+     *
+     * <p>Each entry says which of the three states it is in, so the form can label a retired one
+     * rather than presenting it as a current choice.
+     */
+    private static List<Map<String, Object>> environmentsFor(
+            List<InventoryService.EndpointEnvironment> catalogue, Set<String> recordedHere) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        Set<String> emitted = new LinkedHashSet<>();
+        for (InventoryService.EndpointEnvironment environment : catalogue) {
+            if (!environment.active() && !recordedHere.contains(environment.code())) {
+                continue;
+            }
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("code", environment.code());
+            entry.put("label", environment.label());
+            entry.put("purpose", environment.purpose());
+            entry.put("lifecycleState", environment.lifecycleState());
+            out.add(entry);
+            emitted.add(environment.code());
+        }
+        // A value recorded under a name the catalogue has never heard of — UNSPECIFIED, or whatever an
+        // importer wrote. Shown last, and shown, because the alternative is a host nobody can see.
+        for (String code : recordedHere) {
+            if (emitted.add(code)) {
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("code", code);
+                entry.put("label", code);
+                entry.put("purpose", null);
+                entry.put("lifecycleState", "UNDECLARED");
+                out.add(entry);
+            }
+        }
+        return List.copyOf(out);
+    }
+
+    /**
+     * Reads the submitted endpoint map, refusing an environment the tenant has not declared.
+     *
+     * <p>Refused rather than dropped, which is the opposite of how the read side treats an unknown
+     * environment in a filter. A filter that names a retired environment is a stale bookmark and
+     * narrowing to nothing is the honest answer; a WRITE that names one is either a form built
+     * against a different catalogue or somebody editing the payload, and accepting it would put a
+     * vocabulary nobody agreed to onto an edge — where it becomes a column indistinguishable from a
+     * declared one.
+     *
+     * <p>An environment already recorded on some edge is accepted even if undeclared, because the
+     * form legitimately renders it in order to let somebody clear it.
+     *
+     * <p>Each value may be a single host or a list of them. A string is split on commas: one input
+     * box per environment is what the form shows, and a project on two hosts in one environment has
+     * to be expressible in it.
+     *
+     * @throws IllegalArgumentException naming the offending environment
+     */
+    private static Map<String, List<String>> submittedDomains(Object raw,
+            List<InventoryService.EndpointEnvironment> catalogue) {
+        Map<String, List<String>> domains = new LinkedHashMap<>();
+        if (!(raw instanceof Map<?, ?> submitted)) {
+            // Absent, not empty. An editor that sends no `domains` key at all — an older client, or a
+            // form that does not touch endpoints — leaves every environment exactly as it is; the
+            // service only writes the environments the map names.
+            return domains;
+        }
+        Set<String> acceptable = new LinkedHashSet<>();
+        for (InventoryService.EndpointEnvironment environment : catalogue) {
+            if (environment.active() || environment.recorded()) {
+                acceptable.add(environment.code());
+            }
+        }
+        for (Map.Entry<?, ?> entry : submitted.entrySet()) {
+            String environment = String.valueOf(entry.getKey()).strip();
+            if (!acceptable.contains(environment)) {
+                throw new IllegalArgumentException("no environment " + environment
+                        + " is declared in this tenant. Declare it in the endpoint environment "
+                        + "catalogue before recording a host in it.");
+            }
+            List<String> hosts = new ArrayList<>();
+            if (entry.getValue() instanceof List<?> list) {
+                for (Object host : list) {
+                    addHost(hosts, host);
+                }
+            } else {
+                for (String host : String.valueOf(
+                        entry.getValue() == null ? "" : entry.getValue()).split(",", -1)) {
+                    addHost(hosts, host);
+                }
+            }
+            domains.put(environment, List.copyOf(hosts));
+        }
+        return domains;
+    }
+
+    /** Trimmed, blanks dropped, duplicates dropped. Order is the order somebody typed. */
+    private static void addHost(List<String> hosts, Object raw) {
+        String host = raw == null ? "" : String.valueOf(raw).strip();
+        if (!host.isEmpty() && !hosts.contains(host)) {
+            hosts.add(host);
+        }
     }
 
     private static String repositoryOf(List<InventoryService.Related> related) {
         return related.stream().filter(r -> "REPOSITORY".equals(r.typeCode()))
                 .map(InventoryService.Related::name).findFirst().orElse("");
+    }
+
+    /** The branch this asset is built from, carried on the edge rather than on the repository. */
+    private static String branchOf(List<InventoryService.Related> related) {
+        return related.stream().filter(r -> "REPOSITORY".equals(r.typeCode()))
+                .map(InventoryService.Related::branch).filter(Objects::nonNull)
+                .findFirst().orElse("");
     }
 
     private static UUID actorOf(Principal principal) {

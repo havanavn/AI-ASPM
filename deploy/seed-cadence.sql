@@ -11,25 +11,47 @@
 -- flag is what makes "this application has been assessed fourteen times" stop being an answer to
 -- "when was it last reviewed end to end".
 -- ==============================================================================================
-SET LOCAL aspm.current_tenant = '11111111-1111-1111-1111-111111111111';
+\set ON_ERROR_STOP on
+
+-- WHICH TENANT. Defaults to the demo tenant so every existing flow behaves as before;
+-- seed-bootstrap.sql passes a real one. Workflow states, assessment triggers and declared fields are
+-- TENANT DATA (ADR-027) — a hardcoded id put them in a tenant a real deployment does not serve, and
+-- the symptom is not an error: it is a platform where no transition is defined, no review obligation
+-- exists and no field is offered.
+\if :{?tenant_id}
+\else
+  \set tenant_id '11111111-1111-1111-1111-111111111111'
+\endif
+
+-- *** `SET LOCAL` HERE WAS INERT, AND THAT IS A CORRECTION. ***
+--
+-- psql runs each statement in its own implicit transaction, and `SET LOCAL` outside a transaction
+-- block is discarded with a WARNING rather than an error — so this file established no tenant
+-- context, and the first statement that needed one to READ (the review policy, which joins
+-- criticality_tier) failed with "no tenant context established". The inserts above it carry their
+-- tenant explicitly and so appeared to work, which is why the file looked applied.
+--
+-- Found by running the documented seed path against an empty database, which is the only place a
+-- defect in the FIRST-RUN path can show up.
+SELECT set_config('aspm.current_tenant', :'tenant_id', false);
 
 INSERT INTO assessment_trigger
     (tenant_id, code, label_i18n, counts_as_full_review, guidance, display_order)
 VALUES
-    ('11111111-1111-1111-1111-111111111111', 'CHANGE_REQUEST',
+    (:'tenant_id', 'CHANGE_REQUEST',
      '{"en": "Change review", "vi": "Đánh giá thay đổi"}'::jsonb, false,
      'A specific change is going in. Scope is the change and what it touches, not the application.',
      10),
-    ('11111111-1111-1111-1111-111111111111', 'NEW_GOLIVE',
+    (:'tenant_id', 'NEW_GOLIVE',
      '{"en": "Pre-go-live review", "vi": "Đánh giá trước khi go-live"}'::jsonb, false,
      'Something is about to serve real users or real data for the first time. Blocking by intent.',
      20),
-    ('11111111-1111-1111-1111-111111111111', 'PERIODIC_FULL',
+    (:'tenant_id', 'PERIODIC_FULL',
      '{"en": "Periodic full application review", "vi": "Đánh giá tổng thể định kỳ"}'::jsonb, true,
      'The whole application, on its recurring cycle. This is the review that discharges the '
      'obligation in the review policy; a change review does not, however many there have been.',
      30),
-    ('11111111-1111-1111-1111-111111111111', 'AD_HOC',
+    (:'tenant_id', 'AD_HOC',
      '{"en": "Ad hoc / on request", "vi": "Đánh giá đột xuất"}'::jsonb, false,
      'Raised outside the cycle for a reason none of the above describes. State the reason in the '
      'request title, so that a queue of these does not become an unexplained category.',
@@ -53,11 +75,11 @@ ON CONFLICT (tenant_id, code) DO UPDATE
 -- report "no obligation" for both.
 -- ----------------------------------------------------------------------------------------------
 INSERT INTO full_review_policy (tenant_id, criticality_tier_id, interval_months, warn_days_before)
-SELECT '11111111-1111-1111-1111-111111111111', ct.id,
+SELECT :'tenant_id', ct.id,
        CASE ct.code WHEN 'TIER1' THEN 12 WHEN 'TIER2' THEN 12 ELSE NULL END,
        CASE ct.code WHEN 'TIER1' THEN 90 ELSE 60 END
   FROM criticality_tier ct
- WHERE ct.tenant_id = '11111111-1111-1111-1111-111111111111'
+ WHERE ct.tenant_id = :'tenant_id'
 ON CONFLICT (tenant_id, criticality_tier_id) DO UPDATE
     SET interval_months = EXCLUDED.interval_months,
         warn_days_before = EXCLUDED.warn_days_before;
@@ -73,7 +95,7 @@ ON CONFLICT (tenant_id, criticality_tier_id) DO UPDATE
 UPDATE assessment_request r
    SET trigger_id = (SELECT id FROM assessment_trigger
                       WHERE tenant_id = r.tenant_id AND code = 'AD_HOC')
- WHERE r.tenant_id = '11111111-1111-1111-1111-111111111111'
+ WHERE r.tenant_id = :'tenant_id'
    AND r.trigger_id IS NULL;
 
 -- ----------------------------------------------------------------------------------------------
@@ -90,8 +112,8 @@ UPDATE assessment_request r
 -- between "we decided these do not count" and "nobody has looked at these yet".
 -- ----------------------------------------------------------------------------------------------
 INSERT INTO review_completion_state (tenant_id, state_code, disposition)
-VALUES ('11111111-1111-1111-1111-111111111111', 'CLOSED_PASSED', 'COMPLETED'),
-       ('11111111-1111-1111-1111-111111111111', 'CLOSED_WITH_ACCEPTED_RISK', 'COMPLETED'),
-       ('11111111-1111-1111-1111-111111111111', 'REJECTED', 'ABANDONED'),
-       ('11111111-1111-1111-1111-111111111111', 'CANCELLED', 'ABANDONED')
+VALUES (:'tenant_id', 'CLOSED_PASSED', 'COMPLETED'),
+       (:'tenant_id', 'CLOSED_WITH_ACCEPTED_RISK', 'COMPLETED'),
+       (:'tenant_id', 'REJECTED', 'ABANDONED'),
+       (:'tenant_id', 'CANCELLED', 'ABANDONED')
 ON CONFLICT (tenant_id, state_code) DO UPDATE SET disposition = EXCLUDED.disposition;
