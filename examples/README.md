@@ -15,6 +15,7 @@ aspm_client.py                    the signed-request client the others import
 05_import_findings.py             get findings IN, from a scanner's SARIF output
 06_download_findings.py           get the finding list OUT — JSON, CSV, or the interface's spreadsheet
 07_update_record.py               update SOME fields on a record that already exists
+08_import_inventory_xlsx.py       load an inventory spreadsheet, validating first
 ```
 
 ---
@@ -59,6 +60,7 @@ check the principal's roles before checking anything else.
 | `05` import findings | `ing.findings.import` — **service credentials only**, class F |
 | `06` download | `vul.finding.read`; the coverage line also needs `sbm.coverage.read` |
 | `07` update | `ast.asset.read` · `ast.asset.update` |
+| `08` import | `ast.asset.read` · `ast.asset.create` · `ast.asset.update` · `ast.assettype.read` · `org.node.read` · `org.nodetype.read` · `asm.request.read` |
 
 ---
 
@@ -404,6 +406,73 @@ API projection: finding content is attacker-authored by design, and a snippet re
 repository can carry a payload aimed at whatever reads it next. Serving it belongs to the evidence
 path, from a separate origin. If a report needs it, that is a conversation about evidence handling
 and not a missing query parameter.
+
+---
+
+## Loading a spreadsheet
+
+`08_import_inventory_xlsx.py` reads an `.xlsx` with `zipfile` and `xml.etree` — no `openpyxl`, because
+a loader for a company's whole attack surface is a poor place to add a package nobody has audited.
+
+**It validates by default and writes only with `--apply`.** The first pass resolves every
+organization, tier, person and vocabulary value against the live tenant and sends nothing:
+
+```console
+$ python3 08_import_inventory_xlsx.py inventory.xlsx
+
+  column mapping
+    → Orgnization                        org_node   the organization that owns it
+    → Product/Sản phẩm                   application   grouped under this application
+    → Service/Hệ thống                   project   the record this row becomes
+    → Techstack                          attr:tech_stack
+    → Access (Public/Internal/ZTNA)      access   exposure and access path
+    …
+
+  4 row(s) resolve · 0 refused
+
+  2 row(s) with something worth reading:
+    ! row 4 (Quote engine): owner 'Le Van C' has no account; recorded as delivery_team text
+    ! row 5 (Tokenization service): tech stack not in the tenant vocabulary: COBOL
+    ! row 5 (Tokenization service): WAF 'Fastly WAF' is not in the vocabulary; recorded as OTHER
+                                    and the original kept in the description
+```
+
+Header matching folds accents rather than stripping them — stripping turns `Sản phẩm` into `snphm`,
+which matches nothing and leaves a Vietnamese column silently unmapped.
+
+### Product becomes an application, Service becomes a project
+
+Because the PROJECT type is where the declared fields live: tech stack, access path, API count, WAF,
+abuse controls, architecture link. Mapping a service to an APPLICATION instead keeps the hierarchy
+and loses seven columns — that type declares five fields and they are different ones.
+
+`Access` fills **two** places: `exposure_declared`, which the risk model scores, and the declared
+`access_path`. Public → `INTERNET_PUBLIC` + `DIRECT_INTERNET`; ZTNA → `INTERNAL_ONLY` + `ZTNA`.
+
+`Password Policy` has no field in this tenant. It is **not** folded into `authentication_controls` —
+a policy is not a control, and that list enumerates controls — so it is kept verbatim in the
+description, and the sentence is not split on its commas.
+
+### ⚠ The parent edge cannot be created by any API
+
+A project hangs off its application by a `CONTAINS` edge, and no endpoint writes one: the project
+editor states it "deliberately cannot create one", the SBOM door attaches only the artifact it just
+created, and there is no bulk-import endpoint. So the import creates both records and every service
+arrives **with no application above it** — visible in the projects list with an empty application
+column, and absent from every application-level rollup.
+
+`--emit-link-sql FILE` writes the statements that create those edges. The script does not run them:
+they write `asset_relationship` directly with none of the checks a service method applies.
+
+```console
+$ python3 08_import_inventory_xlsx.py inventory.xlsx --apply --emit-link-sql link.sql
+    row 2  Card settlement service                  project
+    …
+  4 of 4 row(s) written.
+
+  ⚠ 4 service(s) have NO application above them.
+$ psql … -v tenant_id=<your tenant> -f link.sql     # after reading it
+```
 
 ---
 
