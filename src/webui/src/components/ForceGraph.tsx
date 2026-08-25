@@ -3,7 +3,7 @@ import {
   forceCenter, forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY,
   type Simulation, type SimulationLinkDatum, type SimulationNodeDatum,
 } from "d3-force";
-import { Loader2, Maximize2, RotateCcw } from "lucide-react";
+import { Loader2, Maximize2, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,36 +11,39 @@ import { Button } from "@/components/ui/button";
 /**
  * The estate graph: one node, what it is connected to, and what the reader chooses to open.
  *
- * <h2>Why this is hand-rolled SVG over `d3-force` rather than a graph library</h2>
+ * <h2>Hand-rolled SVG over `d3-force`, not a graph library</h2>
  *
  * Every visualisation in this interface is SVG written here — the trend line, the capacity bars, the
  * assessment plan. ADR-006 asks for a single design language, and a graph library brings a second
  * one: its own styling vocabulary, its own event model, and a canvas renderer that is one opaque
  * element to a keyboard and to a screen reader. `d3-force` is the simulation only, 89 kB unpacked,
- * ISC. The 265 kB of `d3-zoom`, `d3-drag` and `d3-selection` are deliberately not here: panning is a
- * transform and dragging is three pointer handlers, and pulling in `d3-selection` would put a second
- * DOM-mutation model next to React's.
+ * ISC. `d3-zoom`, `d3-drag` and `d3-selection` are deliberately absent: panning is a transform,
+ * dragging is three pointer handlers, and `d3-selection` would put a second DOM-mutation model next
+ * to React's.
  *
  * <h2>Shape carries the kind. Colour carries the risk. Neither carries both</h2>
  *
- * DOC-00 prohibits colour as the sole carrier of meaning in a diagram, and a graph is the easiest
- * place in a product to break that rule. So an organization node is a rounded rectangle whatever its
- * colour, an application is a circle, a project a diamond, a service a square, a repository a
- * hexagon, a domain a stadium — legible in monochrome and to anybody who cannot separate red from
- * green. Colour is then free to mean one thing only: whether the node has open critical findings.
+ * DOC-00 prohibits colour as the sole carrier of meaning in a diagram. An organization node is a
+ * rounded rectangle whatever its colour, an application a circle, a project a diamond, a service a
+ * square, a repository a hexagon, a domain a stadium — legible in monochrome. Colour is then free to
+ * mean one thing: the worst severity open on the node. An unmeasured node is dashed and grey, never
+ * green, because `PRD-UIX-022` gives an unmeasured value no numeral form and a clean-looking node
+ * nothing has looked at is the first product principle inverted.
+ *
+ * <h2>Focus dims the rest, and that is the readability decision</h2>
+ *
+ * A force graph past twenty nodes is a hairball. Rather than fight it with layout, hovering or
+ * focusing a node drops everything not adjacent to it to a quarter opacity: the reader's question is
+ * almost always "what is connected to THIS", and answering it by removing noise beats answering it
+ * by drawing better.
  *
  * <h2>It expands; it does not load the estate</h2>
  *
- * Each fetch is one node's neighbourhood. The server marks which neighbours have neighbours of their
- * own, so an unopened branch is visibly different from a leaf — without that, a reader learns to
- * click everything, which is the same as having no affordance.
- *
- * <h2>A dashed stub means the picture is partial</h2>
- *
- * `boundary` says a node is connected to something outside the reader's scope. The count is not
- * disclosed and neither is the identity. It is drawn rather than omitted because a graph that
- * silently stops at the edge of a permission is a graph that looks complete, which is the first
- * product principle inverted.
+ * Each fetch is one node's neighbourhood, and the server marks which neighbours have neighbours of
+ * their own — so an unopened branch is visibly different from a leaf. A dashed stub on a node means
+ * it connects to something outside the reader's scope: no count and no identity, because a count is
+ * an oracle, but drawn rather than omitted because a graph that silently stops at a permission
+ * boundary is a graph that looks complete.
  */
 
 // -------------------------------------------------------------------------------------- the data
@@ -65,69 +68,87 @@ interface Neighbourhood { root: GraphNode; nodes: GraphNode[]; edges: GraphEdge[
 type Placed = GraphNode & SimulationNodeDatum;
 type Linked = SimulationLinkDatum<Placed> & { kind: string };
 
-/** Accountability edges are dashed, technical containment solid. A legend says so. */
+/** Accountability edges are dashed, technical containment solid. The legend says so in words. */
 const ACCOUNTABILITY = new Set(["OWNS", "PARENT"]);
 
 const RADIUS: Record<string, number> = {
-  ORG: 15, APPLICATION: 16, PROJECT: 13, SERVICE: 12, FEATURE: 9, REPOSITORY: 12, DOMAIN: 12,
+  ORG: 17, APPLICATION: 18, PROJECT: 14, SERVICE: 13, FEATURE: 10, REPOSITORY: 13, DOMAIN: 13,
 };
 
-function radiusOf(node: GraphNode): number {
-  return RADIUS[node.kind === "ORG" ? "ORG" : node.typeCode] ?? 11;
+function radiusOf(node: Pick<GraphNode, "kind" | "typeCode">): number {
+  return RADIUS[node.kind === "ORG" ? "ORG" : node.typeCode] ?? 12;
 }
+
+/** The four colour states a node can be in. */
+interface Risk { halo: string; ring: string; chip: string; label: string }
 
 /**
- * One node's outline, centred on the origin.
- *
- * Returned as an element rather than a path string because a stadium needs a rect with a radius and
- * a circle needs a circle: forcing everything through `<path>` would mean hand-writing arc commands
- * for shapes SVG already has.
+ * *** THE CLASS NAMES ARE LITERALS, AND THAT IS NOT VERBOSITY. *** Tailwind generates a class by
+ * finding it as text in the source, so `fill-${token}` generates nothing and the nodes render with
+ * no colour at all. Written out, every class is real. It also keeps the tokens the badges use —
+ * `sev-critical`, `sev-medium`, `tone-ok`, `tone-unknown` — so a node and the badge beside it cannot
+ * disagree about what a colour means, and both follow the light and dark definitions in index.css.
  */
-function Outline({ node, className }: { node: GraphNode; className: string }) {
-  const r = radiusOf(node);
-  if (node.kind === "ORG") {
-    return <rect className={className} x={-r * 1.5} y={-r * 0.78} width={r * 3} height={r * 1.56}
-                 rx={4} />;
-  }
-  switch (node.typeCode) {
-    case "PROJECT":       // diamond
-      return <polygon className={className}
-                      points={`0,${-r * 1.25} ${r * 1.25},0 0,${r * 1.25} ${-r * 1.25},0`} />;
-    case "SERVICE":       // square
-      return <rect className={className} x={-r} y={-r} width={r * 2} height={r * 2} rx={2} />;
-    case "FEATURE":       // triangle
-      return <polygon className={className}
-                      points={`0,${-r * 1.3} ${r * 1.2},${r * 0.9} ${-r * 1.2},${r * 0.9}`} />;
-    case "REPOSITORY": {  // hexagon
-      const points = [0, 1, 2, 3, 4, 5].map((i) => {
-        const angle = (Math.PI / 3) * i - Math.PI / 6;
-        return `${(r * 1.15 * Math.cos(angle)).toFixed(1)},${(r * 1.15 * Math.sin(angle)).toFixed(1)}`;
-      }).join(" ");
-      return <polygon className={className} points={points} />;
-    }
-    case "DOMAIN":        // stadium
-      return <rect className={className} x={-r * 1.6} y={-r * 0.7} width={r * 3.2}
-                   height={r * 1.4} rx={r * 0.7} />;
-    default:              // APPLICATION, and anything a tenant adds later
-      return <circle className={className} r={r} />;
-  }
+const RISK: Record<"critical" | "open" | "clear" | "unmeasured", Risk> = {
+  critical: { halo: "fill-sev-critical/12", ring: "stroke-sev-critical",
+              chip: "fill-sev-critical", label: "critical findings open" },
+  open:     { halo: "fill-sev-medium/12", ring: "stroke-sev-medium",
+              chip: "fill-sev-medium", label: "findings open" },
+  clear:    { halo: "fill-tone-ok/10", ring: "stroke-tone-ok",
+              chip: "fill-tone-ok", label: "measured, nothing open" },
+  unmeasured: { halo: "fill-tone-unknown/10", ring: "stroke-tone-unknown",
+                chip: "fill-tone-unknown", label: "nothing measured" },
+};
+
+function risk(node: GraphNode): Risk {
+  if ((node.criticalOpen ?? 0) > 0) return RISK.critical;
+  if ((node.findingOpen ?? 0) > 0) return RISK.open;
+  if (node.findingOpen === null) return RISK.unmeasured;
+  return RISK.clear;
 }
 
-/** Risk, and only risk. An unmeasured node is not "clean" and is not coloured as though it were. */
-function riskClass(node: GraphNode): string {
-  if ((node.criticalOpen ?? 0) > 0) return "fill-tone-critical/15 stroke-tone-critical";
-  if ((node.findingOpen ?? 0) > 0) return "fill-tone-warn/15 stroke-tone-warn";
-  if (node.findingOpen === null) return "fill-muted stroke-muted-foreground/50";
-  return "fill-tone-ok/10 stroke-tone-ok/70";
+/** One node's outline, centred on the origin. Shapes SVG already has, rather than hand-cut paths. */
+function Outline({ node, className, scale = 1, style }: {
+  node: Pick<GraphNode, "kind" | "typeCode">;
+  className?: string;
+  scale?: number;
+  style?: React.CSSProperties;
+}) {
+  const r = radiusOf(node) * scale;
+  const props = { className, style };
+  if (node.kind === "ORG") {
+    return <rect {...props} x={-r * 1.55} y={-r * 0.8} width={r * 3.1} height={r * 1.6} rx={5} />;
+  }
+  switch (node.typeCode) {
+    case "PROJECT":
+      return <polygon {...props}
+                      points={`0,${-r * 1.3} ${r * 1.3},0 0,${r * 1.3} ${-r * 1.3},0`} />;
+    case "SERVICE":
+      return <rect {...props} x={-r} y={-r} width={r * 2} height={r * 2} rx={3} />;
+    case "FEATURE":
+      return <polygon {...props}
+                      points={`0,${-r * 1.35} ${r * 1.2},${r * 0.85} ${-r * 1.2},${r * 0.85}`} />;
+    case "REPOSITORY": {
+      const points = [0, 1, 2, 3, 4, 5].map((i) => {
+        const a = (Math.PI / 3) * i - Math.PI / 6;
+        return `${(r * 1.15 * Math.cos(a)).toFixed(1)},${(r * 1.15 * Math.sin(a)).toFixed(1)}`;
+      }).join(" ");
+      return <polygon {...props} points={points} />;
+    }
+    case "DOMAIN":
+      return <rect {...props} x={-r * 1.65} y={-r * 0.72} width={r * 3.3} height={r * 1.44}
+                   rx={r * 0.72} />;
+    default:
+      return <circle {...props} r={r} />;
+  }
 }
 
 // ------------------------------------------------------------------------------------ the canvas
 
-export function ForceGraph({ rootId, onOpen, height = 520 }: {
+export function ForceGraph({ rootId, onOpen }: {
   rootId: string;
   /** Called when a reader asks to leave the graph for the record itself. */
   onOpen?: (node: GraphNode) => void;
-  height?: number;
 }) {
   const [nodes, setNodes] = useState<Placed[]>([]);
   const [links, setLinks] = useState<Linked[]>([]);
@@ -135,16 +156,32 @@ export function ForceGraph({ rootId, onOpen, height = 520 }: {
   const [loading, setLoading] = useState<string | null>(rootId);
   const [error, setError] = useState<string | null>(null);
   const [focus, setFocus] = useState<string | null>(null);
+  const [hover, setHover] = useState<string | null>(null);
   const [view, setView] = useState({ x: 0, y: 0, k: 1 });
+  const [size, setSize] = useState({ width: 960, height: 560 });
   const [, redraw] = useState(0);
 
+  const shell = useRef<HTMLDivElement | null>(null);
   const frame = useRef<SVGSVGElement | null>(null);
   const simulation = useRef<Simulation<Placed, Linked> | null>(null);
-  const dragging = useRef<{ id: string; dx: number; dy: number } | null>(null);
+  const dragging = useRef<{ id: string; dx: number; dy: number; moved: boolean } | null>(null);
   const panning = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
 
-  // A reader who has asked for less motion gets a graph that is already settled rather than one that
-  // animates into place. The layout is the same; only the arriving at it is skipped.
+  // The canvas is whatever the container gives it. A fixed viewBox was the reason the graph looked
+  // small in a large dialog: it scaled one drawing to fit rather than drawing more of the estate.
+  useEffect(() => {
+    const element = shell.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const box = entries[0]?.contentRect;
+      if (box && box.width > 40 && box.height > 40) {
+        setSize({ width: Math.round(box.width), height: Math.round(box.height) });
+      }
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
   const stillness = useMemo(
     () => typeof window !== "undefined"
       && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches, []);
@@ -156,14 +193,12 @@ export function ForceGraph({ rootId, onOpen, height = 520 }: {
       for (const incoming of [payload.root, ...payload.nodes]) {
         const existing = byId.get(incoming.id);
         if (existing) {
-          Object.assign(existing, incoming);   // facts refresh; position survives
+          Object.assign(existing, incoming);       // facts refresh; position survives
         } else {
           byId.set(incoming.id, {
             ...incoming,
-            // New nodes start near the node they were opened from, so an expansion reads as
-            // growth from that point rather than as the whole graph rearranging.
-            x: (centre?.x ?? 0) + (Math.random() - 0.5) * 60,
-            y: (centre?.y ?? 0) + (Math.random() - 0.5) * 60,
+            x: (centre?.x ?? 0) + (Math.random() - 0.5) * 80,
+            y: (centre?.y ?? 0) + (Math.random() - 0.5) * 80,
           });
         }
       }
@@ -201,25 +236,30 @@ export function ForceGraph({ rootId, onOpen, height = 520 }: {
     fetchAround(rootId);
   }, [rootId, fetchAround]);
 
-  // The simulation is rebuilt whenever the node or link set changes, and reheated rather than
-  // restarted from scratch: positions carry over, so an expansion nudges the layout instead of
-  // reshuffling a picture the reader had already made sense of.
   useEffect(() => {
     if (!nodes.length) return;
+    const present = new Set(nodes.map((n) => n.id));
+    // *** GUARDED, AND THE GUARD IS NOT DECORATION. *** d3's forceLink THROWS on a link whose
+    // endpoint is not in the node array, and a throw here unmounts the whole React tree — which
+    // presents as a blank tab, because the error boundary is above this component and the dialog
+    // portal goes with it. A dropped edge is a visibly incomplete graph; a thrown one is a page
+    // somebody has to reload.
+    const usable = links.filter((l) => present.has(idOf(l.source)) && present.has(idOf(l.target)));
+
     const sim = forceSimulation<Placed, Linked>(nodes)
-      .force("link", forceLink<Placed, Linked>(links).id((d) => d.id).distance(96).strength(0.7))
-      .force("charge", forceManyBody().strength(-380))
-      .force("collide", forceCollide<Placed>((d) => radiusOf(d) + 12))
-      .force("centre", forceCenter(0, 0).strength(0.06))
-      .force("x", forceX(0).strength(0.02))
-      .force("y", forceY(0).strength(0.02));
+      .force("link", forceLink<Placed, Linked>(usable).id((d) => d.id).distance(110).strength(0.65))
+      .force("charge", forceManyBody().strength(-460).distanceMax(620))
+      .force("collide", forceCollide<Placed>((d) => radiusOf(d) + 16))
+      .force("centre", forceCenter(0, 0).strength(0.05))
+      .force("x", forceX(0).strength(0.015))
+      .force("y", forceY(0).strength(0.015));
 
     if (stillness) {
       sim.stop();
-      for (let i = 0; i < 240; i += 1) sim.tick();
+      for (let i = 0; i < 260; i += 1) sim.tick();
       redraw((n) => n + 1);
     } else {
-      sim.alpha(0.9).on("tick", () => redraw((n) => n + 1));
+      sim.alpha(0.9).alphaDecay(0.028).on("tick", () => redraw((n) => n + 1));
     }
     simulation.current = sim;
     return () => { sim.stop(); simulation.current = null; };
@@ -227,19 +267,30 @@ export function ForceGraph({ rootId, onOpen, height = 520 }: {
 
   // ------------------------------------------------------------------------------ pan, zoom, drag
 
+  const toGraph = useCallback((event: { clientX: number; clientY: number }) => {
+    const svg = frame.current;
+    if (!svg) return { x: 0, y: 0 };
+    const box = svg.getBoundingClientRect();
+    const scale = size.width / (box.width || size.width);
+    return {
+      x: ((event.clientX - box.left) * scale - size.width / 2 - view.x) / view.k,
+      y: ((event.clientY - box.top) * scale - size.height / 2 - view.y) / view.k,
+    };
+  }, [size, view]);
+
   const onPointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
     if (dragging.current) return;
     panning.current = { x: event.clientX, y: event.clientY, ox: view.x, oy: view.y };
-    (event.target as Element).setPointerCapture?.(event.pointerId);
   };
   const onPointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
     if (dragging.current) {
-      const point = toGraph(event, frame.current, view);
+      const point = toGraph(event);
       const node = nodes.find((n) => n.id === dragging.current!.id);
       if (node) {
+        dragging.current.moved = true;
         node.fx = point.x - dragging.current.dx;
         node.fy = point.y - dragging.current.dy;
-        simulation.current?.alpha(0.35).restart();
+        simulation.current?.alpha(0.3).restart();
       }
       return;
     }
@@ -254,46 +305,40 @@ export function ForceGraph({ rootId, onOpen, height = 520 }: {
   const endPointer = () => {
     if (dragging.current) {
       const node = nodes.find((n) => n.id === dragging.current!.id);
-      // Released, not pinned. A node that stayed where it was dropped would slowly turn the layout
-      // into a hand-drawn diagram nobody maintains.
+      // Released rather than pinned: a node left where it was dropped turns the layout into a
+      // hand-drawn diagram nobody maintains.
       if (node) { node.fx = null; node.fy = null; }
       dragging.current = null;
       simulation.current?.alpha(0.2).restart();
     }
     panning.current = null;
   };
-  const onWheel = (event: React.WheelEvent<SVGSVGElement>) => {
-    event.preventDefault();
-    setView((v) => ({ ...v, k: Math.min(2.5, Math.max(0.35, v.k * (event.deltaY < 0 ? 1.1 : 0.9))) }));
-  };
+  const zoom = (factor: number) =>
+    setView((v) => ({ ...v, k: Math.min(3, Math.max(0.3, v.k * factor)) }));
 
   // -------------------------------------------------------------------------------- the keyboard
 
-  /**
-   * Arrow keys move to the neighbour furthest in that direction; Enter opens what is focused.
-   *
-   * ADR-006 is keyboard-first, and a graph is where that is usually abandoned. Each node is a real
-   * focusable element, so tab order works without this; the arrows exist because tabbing through
-   * forty nodes to reach the one next to you is technically accessible and practically not.
-   */
+  const neighboursOf = useCallback((id: string) => {
+    const out = new Set<string>();
+    for (const link of links) {
+      if (idOf(link.source) === id) out.add(idOf(link.target));
+      else if (idOf(link.target) === id) out.add(idOf(link.source));
+    }
+    return out;
+  }, [links]);
+
   const move = (from: string, dx: number, dy: number) => {
     const origin = nodes.find((n) => n.id === from);
     if (!origin) return;
-    const neighbours = links
-      .map((l) => (idOf(l.source) === from ? idOf(l.target)
-        : idOf(l.target) === from ? idOf(l.source) : null))
-      .filter((id): id is string => !!id);
     let best: { id: string; score: number } | null = null;
-    for (const id of new Set(neighbours)) {
+    for (const id of neighboursOf(from)) {
       const node = nodes.find((n) => n.id === id);
       if (!node) continue;
       const vx = (node.x ?? 0) - (origin.x ?? 0);
       const vy = (node.y ?? 0) - (origin.y ?? 0);
       const length = Math.hypot(vx, vy) || 1;
       const alignment = (vx * dx + vy * dy) / length;
-      if (alignment > 0.35 && (!best || alignment > best.score)) {
-        best = { id, score: alignment };
-      }
+      if (alignment > 0.3 && (!best || alignment > best.score)) best = { id, score: alignment };
     }
     if (best) {
       setFocus(best.id);
@@ -318,155 +363,255 @@ export function ForceGraph({ rootId, onOpen, height = 520 }: {
 
   // ------------------------------------------------------------------------------------ rendering
 
-  const box = { width: 900, height };
-  const transform = `translate(${box.width / 2 + view.x} ${box.height / 2 + view.y}) scale(${view.k})`;
+  const lit = hover ?? focus;
+  const adjacent = useMemo(() => (lit ? neighboursOf(lit) : null), [lit, neighboursOf]);
+  const isLit = (id: string) => !adjacent || id === lit || adjacent.has(id);
 
   if (error) {
     return (
-      <div className="grid place-items-center rounded-md border border-dashed p-8 text-sm">
-        <p className="text-destructive">{error}</p>
-        <Button size="sm" variant="ghost" className="mt-2" onClick={() => fetchAround(rootId)}>
-          <RotateCcw className="size-3" /> Try again
-        </Button>
+      <div className="grid h-full place-items-center rounded-md border border-dashed p-8 text-sm">
+        <div className="text-center">
+          <p className="text-destructive">{error}</p>
+          <Button size="sm" variant="ghost" className="mt-2" onClick={() => fetchAround(rootId)}>
+            <RotateCcw className="size-3" /> Try again
+          </Button>
+        </div>
       </div>
     );
   }
 
+  const transform =
+    `translate(${size.width / 2 + view.x} ${size.height / 2 + view.y}) scale(${view.k})`;
+
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+    <div className="flex h-full min-h-0 flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
         <Legend />
         <span className="flex-1" />
-        {loading && <span className="flex items-center gap-1"><Loader2 className="size-3 animate-spin" /> loading…</span>}
-        <Button size="sm" variant="ghost" onClick={() => setView({ x: 0, y: 0, k: 1 })}>
-          <Maximize2 className="size-3" /> Recentre
-        </Button>
+        {loading && (
+          <span className="flex items-center gap-1">
+            <Loader2 className="size-3 animate-spin" /> loading
+          </span>
+        )}
+        <span className="tabular">{nodes.length} nodes · {links.length} edges</span>
+        <span className="flex items-center gap-0.5">
+          <Button size="sm" variant="ghost" className="size-6 p-0" aria-label="Zoom out"
+                  onClick={() => zoom(1 / 1.25)}><ZoomOut className="size-3.5" /></Button>
+          <Button size="sm" variant="ghost" className="size-6 p-0" aria-label="Zoom in"
+                  onClick={() => zoom(1.25)}><ZoomIn className="size-3.5" /></Button>
+          <Button size="sm" variant="ghost" aria-label="Recentre"
+                  onClick={() => setView({ x: 0, y: 0, k: 1 })}>
+            <Maximize2 className="size-3" /> Recentre
+          </Button>
+        </span>
       </div>
 
-      <svg ref={frame} viewBox={`0 0 ${box.width} ${box.height}`}
-           className="w-full cursor-grab touch-none rounded-md border bg-card active:cursor-grabbing"
-           style={{ blockSize: height }}
-           role="application"
-           aria-label="Estate graph. Use tab to move between nodes, the arrow keys to move to a
-                       connected node, and enter to expand or open one."
-           onPointerDown={onPointerDown} onPointerMove={onPointerMove}
-           onPointerUp={endPointer} onPointerLeave={endPointer} onWheel={onWheel}>
-        <g transform={transform}>
-          {links.map((link, index) => {
-            const source = typeof link.source === "object" ? link.source : null;
-            const target = typeof link.target === "object" ? link.target : null;
-            if (!source || !target) return null;
-            return (
-              <line key={`${idOf(link.source)}-${idOf(link.target)}-${link.kind}-${index}`}
-                    x1={source.x} y1={source.y} x2={target.x} y2={target.y}
-                    className={ACCOUNTABILITY.has(link.kind)
-                      ? "stroke-muted-foreground/45" : "stroke-muted-foreground/70"}
-                    strokeWidth={1.2}
-                    strokeDasharray={ACCOUNTABILITY.has(link.kind) ? "4 3" : undefined} />
-            );
-          })}
+      <div ref={shell} className="relative min-h-0 flex-1 overflow-hidden rounded-lg border
+                                  bg-[radial-gradient(circle_at_50%_40%,var(--color-muted),var(--color-card))]">
+        <svg ref={frame} viewBox={`0 0 ${size.width} ${size.height}`}
+             width="100%" height="100%"
+             className="block cursor-grab touch-none select-none active:cursor-grabbing"
+             role="application"
+             aria-label="Estate graph. Tab moves between nodes, the arrow keys move to a connected
+                         node, and enter expands or opens one."
+             onPointerDown={onPointerDown} onPointerMove={onPointerMove}
+             onPointerUp={endPointer} onPointerLeave={endPointer}
+             onPointerCancel={endPointer}
+             onWheel={(event) => { event.preventDefault(); zoom(event.deltaY < 0 ? 1.1 : 0.9); }}>
+          <defs>
+            {/* Depth without a gradient on every node: one shadow, referenced. */}
+            <filter id="graph-lift" x="-40%" y="-40%" width="180%" height="180%">
+              <feDropShadow dx="0" dy="1" stdDeviation="1.6" floodOpacity="0.18" />
+            </filter>
+            {["contains", "owns"].map((kind) => (
+              <marker key={kind} id={`graph-arrow-${kind}`} viewBox="0 0 8 8" refX="7" refY="4"
+                      markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M0,1 L7,4 L0,7 z"
+                      className={kind === "owns" ? "fill-muted-foreground/50"
+                        : "fill-muted-foreground/80"} />
+              </marker>
+            ))}
+          </defs>
 
-          {nodes.map((node) => {
-            const r = radiusOf(node);
-            const isFocus = focus === node.id;
-            const unopened = node.expandable && !expanded.has(node.id);
-            return (
-              <g key={node.id} data-node={node.id} tabIndex={0} role="button"
-                 transform={`translate(${node.x ?? 0} ${node.y ?? 0})`}
-                 className="cursor-pointer outline-none"
-                 aria-label={describe(node, unopened)}
-                 onKeyDown={(event) => onNodeKeyDown(event, node)}
-                 onFocus={() => setFocus(node.id)}
-                 onPointerDown={(event) => {
-                   event.stopPropagation();
-                   const point = toGraph(event, frame.current, view);
-                   dragging.current = {
-                     id: node.id, dx: point.x - (node.x ?? 0), dy: point.y - (node.y ?? 0),
-                   };
-                 }}
-                 onClick={(event) => {
-                   event.stopPropagation();
-                   if (unopened) fetchAround(node.id); else onOpen?.(node);
-                 }}>
-                {isFocus && <Outline node={node} className="fill-none stroke-primary"
-                                     key="focus-ring" />}
-                <Outline node={node} className={`${riskClass(node)} stroke-[1.4]`} />
+          <g transform={transform}>
+            {links.map((link, index) => {
+              const source = typeof link.source === "object" ? link.source : null;
+              const target = typeof link.target === "object" ? link.target : null;
+              if (!source || !target) return null;
+              const accountability = ACCOUNTABILITY.has(link.kind);
+              const shown = isLit(source.id) && isLit(target.id);
+              // A gentle curve rather than a straight line: two nodes with edges both ways stop
+              // overlapping, and a dense cluster reads as strands instead of a single grey mass.
+              const mx = ((source.x ?? 0) + (target.x ?? 0)) / 2;
+              const my = ((source.y ?? 0) + (target.y ?? 0)) / 2;
+              const nx = -((target.y ?? 0) - (source.y ?? 0)) * 0.12;
+              const ny = ((target.x ?? 0) - (source.x ?? 0)) * 0.12;
+              return (
+                <path key={`${source.id}-${target.id}-${link.kind}-${index}`}
+                      d={`M${source.x},${source.y} Q${mx + nx},${my + ny} ${target.x},${target.y}`}
+                      fill="none"
+                      className={accountability
+                        ? "stroke-muted-foreground/45" : "stroke-muted-foreground/70"}
+                      strokeWidth={accountability ? 1.1 : 1.5}
+                      strokeDasharray={accountability ? "5 4" : undefined}
+                      markerEnd={`url(#graph-arrow-${accountability ? "owns" : "contains"})`}
+                      style={{ opacity: shown ? 1 : 0.1, transition: "opacity 140ms" }} />
+              );
+            })}
 
-                {/* A dashed stub, not a count: this node touches something outside your scope. */}
-                {node.boundary && (
-                  <line x1={r * 1.1} y1={-r * 1.1} x2={r * 1.9} y2={-r * 1.9}
-                        className="stroke-muted-foreground" strokeWidth={1.2}
-                        strokeDasharray="2 2" />
-                )}
+            {nodes.map((node) => {
+              const r = radiusOf(node);
+              const isRoot = node.id === rootId;
+              const isFocus = focus === node.id;
+              const unopened = node.expandable && !expanded.has(node.id);
+              const tone = risk(node);
+              const shown = isLit(node.id);
+              return (
+                <g key={node.id} data-node={node.id} tabIndex={0} role="button"
+                   transform={`translate(${node.x ?? 0} ${node.y ?? 0})`}
+                   className="cursor-pointer outline-none"
+                   style={{ opacity: shown ? 1 : 0.22, transition: "opacity 140ms" }}
+                   aria-label={describe(node, unopened, tone.label)}
+                   onKeyDown={(event) => onNodeKeyDown(event, node)}
+                   onFocus={() => setFocus(node.id)}
+                   onPointerEnter={() => setHover(node.id)}
+                   onPointerLeave={() => setHover(null)}
+                   onPointerDown={(event) => {
+                     event.stopPropagation();
+                     const point = toGraph(event);
+                     dragging.current = {
+                       id: node.id, dx: point.x - (node.x ?? 0), dy: point.y - (node.y ?? 0),
+                       moved: false,
+                     };
+                   }}
+                   onClick={(event) => {
+                     event.stopPropagation();
+                     // A drag is not a click. Without this, moving a node also expanded it.
+                     if (dragging.current?.moved) return;
+                     if (unopened) fetchAround(node.id); else onOpen?.(node);
+                   }}>
+                  {/* The risk halo. Outside the shape so it reads at a glance from across the
+                      canvas, where a 1px stroke does not. */}
+                  <Outline node={node} scale={1.42} className={`${tone.halo} stroke-none`} />
+                  {(isFocus || isRoot) && (
+                    <Outline node={node} scale={1.72} className="fill-none stroke-primary/70"
+                             style={{ strokeWidth: isRoot ? 1.6 : 1.2,
+                                      strokeDasharray: isRoot ? undefined : "3 3" }} />
+                  )}
+                  <Outline node={node} className={`fill-card ${tone.ring}`}
+                           style={{ strokeWidth: isRoot ? 2.4 : 1.7, filter: "url(#graph-lift)" }} />
 
-                {/* The affordance for an unopened branch. A plus, not a colour. */}
-                {unopened && (
-                  <>
-                    <line x1={-3} y1={r + 8} x2={3} y2={r + 8} className="stroke-foreground" strokeWidth={1.4} />
-                    <line x1={0} y1={r + 5} x2={0} y2={r + 11} className="stroke-foreground" strokeWidth={1.4} />
-                  </>
-                )}
+                  {/* The scope boundary: a dashed stub, never a count. */}
+                  {node.boundary && (
+                    <line x1={r * 1.15} y1={-r * 1.15} x2={r * 2.1} y2={-r * 2.1}
+                          className="stroke-muted-foreground" strokeWidth={1.3}
+                          strokeDasharray="2 2" />
+                  )}
 
-                <text y={-r - 7} textAnchor="middle"
-                      className="pointer-events-none fill-foreground text-[10px] font-medium">
-                  {node.name.length > 26 ? `${node.name.slice(0, 25)}…` : node.name}
-                </text>
-                <text y={r + 20} textAnchor="middle"
-                      className="pointer-events-none fill-muted-foreground text-[9px]">
-                  {node.kind === "ORG" ? node.typeCode.toLowerCase().replace(/_/g, " ")
-                    : node.findingOpen === null ? "not measured"
-                    : `${node.findingOpen} open`}
-                </text>
-              </g>
-            );
-          })}
-        </g>
-      </svg>
+                  {/* The affordance for an unopened branch: a plus, not a colour. */}
+                  {unopened && (
+                    <g className="fill-card stroke-muted-foreground" strokeWidth={1}>
+                      <circle cx={0} cy={r + 12} r={6.5} />
+                      <line x1={-3} y1={r + 12} x2={3} y2={r + 12} className="stroke-foreground"
+                            strokeWidth={1.4} />
+                      <line x1={0} y1={r + 9} x2={0} y2={r + 15} className="stroke-foreground"
+                            strokeWidth={1.4} />
+                    </g>
+                  )}
 
-      {focus && <Selected node={nodes.find((n) => n.id === focus)} onOpen={onOpen} />}
+                  {/* The count, on the node, where the eye already is. Absent when nothing has been
+                      measured — a zero would read as "measured, and clean". */}
+                  {(node.findingOpen ?? 0) > 0 && (
+                    <g transform={`translate(${r * 1.05} ${-r * 1.05})`}>
+                      <circle r={8} className={tone.chip} />
+                      <text textAnchor="middle" dy="3"
+                            className="pointer-events-none fill-card text-[8px] font-semibold">
+                        {node.findingOpen! > 99 ? "99+" : node.findingOpen}
+                      </text>
+                    </g>
+                  )}
+
+                  <text y={-r - 11} textAnchor="middle"
+                        className="pointer-events-none fill-foreground text-[10.5px] font-medium"
+                        style={{ paintOrder: "stroke", stroke: "var(--color-card)",
+                                 strokeWidth: 3, strokeLinejoin: "round" }}>
+                    {node.name.length > 30 ? `${node.name.slice(0, 29)}…` : node.name}
+                  </text>
+                  <text y={r + (unopened ? 26 : 18)} textAnchor="middle"
+                        className="pointer-events-none fill-muted-foreground text-[9px]"
+                        style={{ paintOrder: "stroke", stroke: "var(--color-card)",
+                                 strokeWidth: 2.5, strokeLinejoin: "round" }}>
+                    {node.kind === "ORG" ? node.typeCode.toLowerCase().replace(/_/g, " ")
+                      : node.findingOpen === null ? "not measured" : node.typeCode.toLowerCase()}
+                  </text>
+                </g>
+              );
+            })}
+          </g>
+        </svg>
+      </div>
+
+      <Selected node={nodes.find((n) => n.id === (focus ?? rootId))} onOpen={onOpen} />
     </div>
   );
 }
 
 // ------------------------------------------------------------------------------------- fragments
 
+const SHAPES: [string, Pick<GraphNode, "kind" | "typeCode">][] = [
+  ["organization", { kind: "ORG", typeCode: "ORG" }],
+  ["application", { kind: "ASSET", typeCode: "APPLICATION" }],
+  ["project", { kind: "ASSET", typeCode: "PROJECT" }],
+  ["service", { kind: "ASSET", typeCode: "SERVICE" }],
+  ["repository", { kind: "ASSET", typeCode: "REPOSITORY" }],
+  ["domain", { kind: "ASSET", typeCode: "DOMAIN" }],
+];
+
 function Legend() {
   return (
     <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-      {[["organization", "rect"], ["application", "circle"], ["project", "diamond"],
-        ["service", "square"], ["repository", "hexagon"], ["domain", "stadium"]]
-        .map(([label, shape]) => (
+      {SHAPES.map(([label, shape]) => (
+        <span key={label} className="flex items-center gap-1">
+          <svg width="15" height="15" viewBox="-11 -11 22 22" aria-hidden="true">
+            <Outline node={shape} scale={0.5}
+                     className="fill-card stroke-muted-foreground" style={{ strokeWidth: 1.4 }} />
+          </svg>
+          {label}
+        </span>
+      ))}
+      <span className="mx-1 h-3 w-px bg-border" />
+      {([["critical", "fill-sev-critical/25 stroke-sev-critical"],
+         ["open", "fill-sev-medium/25 stroke-sev-medium"],
+         ["clear", "fill-tone-ok/25 stroke-tone-ok"],
+         ["not measured", "fill-tone-unknown/25 stroke-tone-unknown"]] as const).map(
+        ([label, classes]) => (
           <span key={label} className="flex items-center gap-1">
-            <svg width="14" height="14" viewBox="-8 -8 16 16" aria-hidden="true">
-              <Outline node={{ kind: shape === "rect" ? "ORG" : "ASSET",
-                               typeCode: { circle: "APPLICATION", diamond: "PROJECT",
-                                           square: "SERVICE", hexagon: "REPOSITORY",
-                                           stadium: "DOMAIN", rect: "ORG" }[shape as string]!,
-                             } as GraphNode}
-                       className="fill-muted stroke-muted-foreground" />
+            <svg width="11" height="11" viewBox="-6 -6 12 12" aria-hidden="true">
+              <circle r="5" className={classes} strokeWidth="1.4" />
             </svg>
             {label}
           </span>
         ))}
+      <span className="mx-1 h-3 w-px bg-border" />
       <span className="flex items-center gap-1">
-        <svg width="14" height="10" viewBox="0 0 14 10" aria-hidden="true">
-          <line x1="0" y1="5" x2="14" y2="5" className="stroke-muted-foreground/45"
-                strokeWidth="1.2" strokeDasharray="4 3" />
+        <svg width="16" height="10" viewBox="0 0 16 10" aria-hidden="true">
+          <line x1="0" y1="5" x2="16" y2="5" className="stroke-muted-foreground/45"
+                strokeWidth="1.1" strokeDasharray="5 4" />
         </svg>
         owns
       </span>
       <span className="flex items-center gap-1">
-        <svg width="14" height="10" viewBox="0 0 14 10" aria-hidden="true">
-          <line x1="0" y1="5" x2="14" y2="5" className="stroke-muted-foreground/70" strokeWidth="1.2" />
+        <svg width="16" height="10" viewBox="0 0 16 10" aria-hidden="true">
+          <line x1="0" y1="5" x2="16" y2="5" className="stroke-muted-foreground/70" strokeWidth="1.5" />
         </svg>
         contains
       </span>
       <span className="flex items-center gap-1">
         <svg width="14" height="14" viewBox="-7 -7 14 14" aria-hidden="true">
-          <line x1="-4" y1="4" x2="4" y2="-4" className="stroke-muted-foreground" strokeWidth="1.2"
+          <line x1="-4" y1="4" x2="4" y2="-4" className="stroke-muted-foreground" strokeWidth="1.3"
                 strokeDasharray="2 2" />
         </svg>
-        connects beyond your scope
+        beyond your scope
       </span>
     </span>
   );
@@ -477,18 +622,21 @@ function Selected({ node, onOpen }: { node?: GraphNode; onOpen?: (n: GraphNode) 
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs">
       <span className="font-medium">{node.name}</span>
-      <Badge tone="neutral">{node.kind === "ORG" ? "organization" : node.typeCode.toLowerCase()}</Badge>
-      {node.exposureDeclared && <Badge tone="info">{node.exposureDeclared.toLowerCase()}</Badge>}
+      <Badge tone="neutral">
+        {node.kind === "ORG" ? node.typeCode.toLowerCase().replace(/_/g, " ")
+          : node.typeCode.toLowerCase()}
+      </Badge>
+      {node.exposureDeclared && (
+        <Badge tone="info">{node.exposureDeclared.toLowerCase().replace(/_/g, " ")}</Badge>
+      )}
       {node.criticalityCode && <Badge tone="warn">{node.criticalityCode}</Badge>}
-      {/* Absent and zero are different answers, and the badge says which. */}
       {node.findingOpen === null
-        ? <span className="italic text-tone-unknown">nothing measured</span>
-        : <span>{node.findingOpen} open{(node.criticalOpen ?? 0) > 0
-            ? `, ${node.criticalOpen} critical` : ""}</span>}
+        ? <Badge tone="unknown">nothing measured</Badge>
+        : (node.criticalOpen ?? 0) > 0
+          ? <Badge tone="critical">{node.criticalOpen} critical of {node.findingOpen} open</Badge>
+          : <Badge tone={node.findingOpen > 0 ? "medium" : "ok"}>{node.findingOpen} open</Badge>}
       {node.boundary && (
-        <span className="text-muted-foreground">
-          · connects to something outside your scope
-        </span>
+        <span className="text-muted-foreground">· connects beyond your scope</span>
       )}
       <span className="flex-1" />
       {onOpen && <Button size="sm" variant="ghost" onClick={() => onOpen(node)}>Open record</Button>}
@@ -496,11 +644,11 @@ function Selected({ node, onOpen }: { node?: GraphNode; onOpen?: (n: GraphNode) 
   );
 }
 
-function describe(node: GraphNode, unopened: boolean): string {
+function describe(node: GraphNode, unopened: boolean, risky: string): string {
   const kind = node.kind === "ORG" ? "organization node" : node.typeCode.toLowerCase();
   const findings = node.findingOpen === null ? "nothing measured"
     : `${node.findingOpen} open finding${node.findingOpen === 1 ? "" : "s"}`;
-  return [node.name, kind, findings,
+  return [node.name, kind, findings, risky === findings ? null : risky,
     node.boundary ? "connects beyond your scope" : null,
     unopened ? "press enter to expand" : "press enter to open the record"]
     .filter(Boolean).join(", ");
@@ -508,15 +656,4 @@ function describe(node: GraphNode, unopened: boolean): string {
 
 function idOf(end: string | Placed | number | undefined): string {
   return typeof end === "object" && end !== null ? end.id : String(end);
-}
-
-function toGraph(event: { clientX: number; clientY: number }, svg: SVGSVGElement | null,
-                 view: { x: number; y: number; k: number }) {
-  if (!svg) return { x: 0, y: 0 };
-  const box = svg.getBoundingClientRect();
-  const scale = 900 / box.width;             // the viewBox is 900 wide whatever the element is
-  return {
-    x: ((event.clientX - box.left) * scale - 450 - view.x) / view.k,
-    y: ((event.clientY - box.top) * scale - (svg.viewBox.baseVal.height / 2) - view.y) / view.k,
-  };
 }
