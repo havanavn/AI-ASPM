@@ -391,6 +391,12 @@ public final class PlatformOperations {
         // The endpoint environment catalogue — the vocabulary both inventory editors render their
         // domain inputs from. A read anyone who can read the inventory may make, because the labels
         // appear on every list; writes are class E under the same permission as the field catalogue.
+        // The estate graph. A read over two structures at once, so it is authorized as a scoped
+        // read on the asset side — the organization nodes it returns are already filtered by the
+        // caller's own closure, which is what SEC-AUZ-016 asks of an aggregate.
+        operations.add(new OperationRegistry.Operation("GET", "/api/ui/graph/{id}",
+                AnnotationClass.A_SCOPED_READ, Optional.of(aspm.app.ui.ApplicationPages.READ),
+                Set.of(), Set.of()));
         operations.add(new OperationRegistry.Operation("GET", "/api/ui/settings/environments",
                 AnnotationClass.A_SCOPED_READ, Optional.of(aspm.app.ui.ApplicationPages.READ),
                 Set.of(), Set.of()));

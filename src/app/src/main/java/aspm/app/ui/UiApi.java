@@ -3184,6 +3184,60 @@ public final class UiApi {
         return json(body);
     }
 
+    /**
+     * {@code GET /api/ui/graph/{id}} — one node and what it is directly connected to.
+     *
+     * <p>The identifier may name an asset or an organization node and the caller does not say which:
+     * the graph crosses the join ADR-001 puts between the two structures, so demanding the kind up
+     * front would make the client responsible for a distinction the server has to make anyway.
+     *
+     * <p>A neighbourhood, not the graph. Every node carries whether it has neighbours of its own, so
+     * a reader expands what they care about and the payload grows with the reading rather than with
+     * the company — the rule the composition tree already follows.
+     */
+    public Dispatcher.Response graph(Dispatcher.Request request) throws Exception {
+        Principal principal = request.principal();
+        UUID id = uuid(request.pathVariables().get("id"));
+        if (id == null) {
+            return Dispatcher.Response.notFound();
+        }
+        var found = new aspm.app.inventory.GraphQuery(dataSource).around(principal, id);
+        if (found.isEmpty()) {
+            // The same 404 a non-existent identifier gets. SEC-AUZ-020: non-existence and
+            // non-authorization are indistinguishable, in status, code, message and timing.
+            return Dispatcher.Response.notFound();
+        }
+        var neighbourhood = found.orElseThrow();
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("root", graphNode(neighbourhood.root()));
+        body.put("nodes", neighbourhood.nodes().stream().map(UiApi::graphNode).toList());
+        body.put("edges", neighbourhood.edges().stream().map(edge -> Map.of(
+                "from", edge.from().toString(), "to", edge.to().toString(),
+                "kind", edge.kind())).toList());
+        return json(body);
+    }
+
+    private static Map<String, Object> graphNode(
+            aspm.app.inventory.GraphQuery.Node node) {
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("id", node.id().toString());
+        entry.put("kind", node.kind());
+        entry.put("typeCode", node.typeCode());
+        entry.put("name", node.name());
+        entry.put("lifecycleState", node.lifecycleState());
+        entry.put("exposureDeclared", node.exposureDeclared());
+        entry.put("criticalityCode", node.criticalityCode());
+        // null, never zero. PRD-UIX-022: an unmeasured value has no numeral form, and a zero here
+        // would read as "scored, and it scored nothing" for an asset nothing has looked at.
+        entry.put("findingOpen", node.findingOpen());
+        entry.put("criticalOpen", node.criticalOpen());
+        // "This node is connected to something you cannot see." No count and no identity: a count is
+        // an oracle. The legend explains it rather than leaving a reader to infer completeness.
+        entry.put("boundary", node.boundary());
+        entry.put("expandable", node.expandable());
+        return entry;
+    }
+
     /** {@code GET /api/ui/projects/{id}}. */
     public Dispatcher.Response project(Dispatcher.Request request) throws Exception {
         Principal principal = request.principal();

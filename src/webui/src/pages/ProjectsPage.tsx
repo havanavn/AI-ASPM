@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AttributeCell, AttributeFilters, ColumnPicker, useDeclaredColumns, type CellValue } from "@/components/DeclaredColumns";
+import { GraphDrawer } from "@/components/GraphDrawer";
 import type { FieldDefinition } from "@/components/AttributeFields";
 
 const ANY = "__any__";
@@ -203,8 +204,8 @@ export function ProjectsPage() {
               {paging.rows.map((p) => (
                 <TableRow key={p.id}>
                   <TableCell className="max-w-72">
-                    <Link to={`/projects/${p.id}`}
-                          className="font-medium text-primary hover:underline">{p.name}</Link>
+                    <span className="flex items-center gap-1"><Link to={`/projects/${p.id}`}
+                          className="font-medium text-primary hover:underline">{p.name}</Link><GraphDrawer compact rootId={p.id} label={p.name} /></span>
                     {p.description && (
                       <div className="truncate text-[11px] text-muted-foreground">{p.description}</div>
                     )}

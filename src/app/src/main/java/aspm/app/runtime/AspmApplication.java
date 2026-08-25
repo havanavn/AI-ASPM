@@ -362,6 +362,10 @@ public final class AspmApplication {
                 webApi::revokeServiceCredential));
         routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/dependencies/export"),
                 webApi::dependencyExport));
+        // The estate graph. One node and its immediate neighbours, whichever structure the
+        // identifier names — registered before /api/ui/projects so no template can swallow it.
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/graph/{id}"),
+                webApi::graph));
         routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/projects"),
                 webApi::projects));
         routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/projects/{id}"),

@@ -343,7 +343,10 @@ class ApplicationTierTest {
             // shapes as the field catalogue because it is the same kind of tenant vocabulary. No SPA
             // page of its own: it is a section of the existing settings screen, so there is no sixth
             // class-G shell operation here.
-            assertEquals(208, registry.all().size(), "registered: " + registry.all().size());
+            //
+            // 209: the estate graph — one read. No SPA page of its own: it opens as a drawer over
+            // the dashboard the reader is already on, so there is no class-G shell operation.
+            assertEquals(209, registry.all().size(), "registered: " + registry.all().size());
         }
 
         @Test

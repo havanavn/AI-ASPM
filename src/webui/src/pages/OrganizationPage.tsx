@@ -6,6 +6,7 @@ import {
 import { api, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { GraphDrawer } from "@/components/GraphDrawer";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -342,9 +343,14 @@ function NodeApplications({ node }: { node: Node }) {
             including every node beneath it
           </span>
         </span>
-        <Link to={`/applications?node=${node.id}`} className="text-xs text-primary hover:underline">
-          Open in the inventory
-        </Link>
+        <span className="flex items-center gap-2">
+          {/* The organization tree and the asset graph are separate structures joined by ownership
+              (ADR-001); this is where a reader crosses from one into the other. */}
+          <GraphDrawer compact rootId={node.id} label={node.name} />
+          <Link to={`/applications?node=${node.id}`} className="text-xs text-primary hover:underline">
+            Open in the inventory
+          </Link>
+        </span>
       </div>
       <div className="overflow-x-auto rounded-md border bg-card">
         <Table>

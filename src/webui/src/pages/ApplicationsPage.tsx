@@ -15,6 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { CadenceCell, ScoreCell, type Cadence } from "@/components/inventory";
 import { Pager, usePaging } from "@/components/Paging";
 import { AttributeCell, AttributeFilters, ColumnPicker, useDeclaredColumns, type CellValue } from "@/components/DeclaredColumns";
+import { GraphDrawer } from "@/components/GraphDrawer";
 import type { FieldDefinition } from "@/components/AttributeFields";
 
 const ANY = "__any__";
@@ -258,9 +259,13 @@ export function ApplicationsPage() {
               {paging.rows.map((row) => (
                 <TableRow key={row.id}>
                   <TableCell>
-                    <Link to={`/applications/${row.id}`} className="font-medium text-primary hover:underline">
-                      {row.name}
-                    </Link>
+                    <span className="flex items-center gap-1">
+                      <Link to={`/applications/${row.id}`} className="font-medium text-primary hover:underline">
+                        {row.name}
+                      </Link>
+                      {/* What this is connected to, without leaving the filtered list. */}
+                      <GraphDrawer compact rootId={row.id} label={row.name} />
+                    </span>
                     {row.userBase && <div className="text-[11px] text-muted-foreground">{row.userBase}</div>}
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">

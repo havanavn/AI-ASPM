@@ -336,6 +336,12 @@ class OperationManifestTest {
                 // PRD-AST-004 is the published-on relationship the vocabulary labels; PRD-TEN-004
                 // keeps the configuration isolated per tenant; PRD-AUZ-006 is deny-by-default, which
                 // is what a tenant with nobody holding cfg.asset.field.manage has to mean.
+                // The estate graph. PRD-AST-001 is the single Asset aggregate it walks; PRD-AST-004
+                // the relationships it draws; PRD-ORG-001 the organization tree it crosses into;
+                // SEC-AUZ-016 the scope predicate, applied at retrieval because a graph is an
+                // aggregate and filtering one afterwards is how a node nobody may see gets drawn.
+                case "/api/ui/graph/{id}" ->
+                        List.of("PRD-AST-001", "PRD-AST-004", "PRD-ORG-001", "SEC-AUZ-016");
                 case "/api/ui/settings/environments", "/api/ui/settings/environments/{id}",
                      "/api/ui/settings/environments/{id}/lifecycle",
                      "/api/ui/settings/environments/{id}/move" ->
