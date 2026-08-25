@@ -283,28 +283,43 @@ export function ForceGraph({ rootId, onOpen }: {
     panning.current = { x: event.clientX, y: event.clientY, ox: view.x, oy: view.y };
   };
   const onPointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
-    if (dragging.current) {
+    // *** THE REF IS READ HERE, NEVER INSIDE THE UPDATER, AND THAT IS THE BUG THIS FIXES. ***
+    //
+    // It used to be `setView(v => ({ ...v, x: panning.current!.ox + … }))`. React calls an updater
+    // LATER than the event — and may call it twice — so by the time it ran, `pointerup` had already
+    // fired `endPointer` and set `panning.current` to null. The result was
+    //
+    //     Cannot read properties of null (reading 'ox')
+    //
+    // thrown from a render, which is why it took the whole graph rather than one gesture. The `!`
+    // was what let it compile: the truthiness check sat outside the closure, so TypeScript could not
+    // narrow inside it and I silenced the complaint instead of answering it.
+    //
+    // Captured into locals first, the updater closes over numbers. Nothing it reads can be nulled
+    // between the event and the render.
+    const drag = dragging.current;
+    if (drag) {
       const point = toGraph(event);
-      const node = nodes.find((n) => n.id === dragging.current!.id);
+      const node = nodes.find((n) => n.id === drag.id);
       if (node) {
-        dragging.current.moved = true;
-        node.fx = point.x - dragging.current.dx;
-        node.fy = point.y - dragging.current.dy;
+        drag.moved = true;
+        node.fx = point.x - drag.dx;
+        node.fy = point.y - drag.dy;
         simulation.current?.alpha(0.3).restart();
       }
       return;
     }
-    if (panning.current) {
-      setView((v) => ({
-        ...v,
-        x: panning.current!.ox + (event.clientX - panning.current!.x),
-        y: panning.current!.oy + (event.clientY - panning.current!.y),
-      }));
+    const pan = panning.current;
+    if (pan) {
+      const dx = event.clientX - pan.x;
+      const dy = event.clientY - pan.y;
+      setView((v) => ({ ...v, x: pan.ox + dx, y: pan.oy + dy }));
     }
   };
   const endPointer = () => {
-    if (dragging.current) {
-      const node = nodes.find((n) => n.id === dragging.current!.id);
+    const drag = dragging.current;
+    if (drag) {
+      const node = nodes.find((n) => n.id === drag.id);
       // Released rather than pinned: a node left where it was dropped turns the layout into a
       // hand-drawn diagram nobody maintains.
       if (node) { node.fx = null; node.fy = null; }
