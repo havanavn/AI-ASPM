@@ -42,9 +42,24 @@ import javax.sql.DataSource;
 public final class AssessmentPlanQuery {
 
     /** One application's planning row. */
+    /**
+     * One application on the plan.
+     *
+     * <p>The last four fields are what a planner sizes an engagement from, and they are here rather
+     * than a click away because the decision they inform — how much of the next quarter this target
+     * needs — is made while scanning the list. {@code exposureDeclared} is the asset's own column;
+     * {@code apiCount} is summed over the application's projects, where the Excel inventory records
+     * it; {@code projectCount} says how many parts the sum came from, because 300 endpoints across
+     * one project and across nine are different engagements.
+     *
+     * <p>{@code apiCount} is null and not zero when nothing declared one. Product principle 1: an
+     * application whose API count nobody recorded is not an application with no APIs, and a zero in a
+     * column somebody sorts by to find the small jobs would put it first.
+     */
     public record PlanRow(String assetId, String name, String orgPath, String criticality,
             long completed, long inFlight, long abandoned, String lastReviewAt, Integer intervalMonths,
-            String nextDueAt, String status, long openRequests, long severeOpen) {
+            String nextDueAt, String status, long openRequests, long severeOpen,
+            String exposureDeclared, Integer apiCount, long projectCount, long plannedWindows) {
     }
 
     /** One bar: a request that happened, or the projection of one that is owed. */
@@ -53,8 +68,21 @@ public final class AssessmentPlanQuery {
             boolean fullReview) {
     }
 
-    /** A project under an application, so a scheduling action can name a real scope. */
-    public record ProjectRef(String assetId, String projectId, String name) {
+    /**
+     * A project under an application: a real scope a request can name, and the granularity the sizing
+     * facts are actually declared at.
+     *
+     * <p>{@code apiCount} and {@code accessPath} are tenant-declared fields on the PROJECT asset type
+     * ({@code api_count}, {@code access_path}) — which is why breaking the plan down by project is not
+     * cosmetic. At application level the API count is a sum and the access path is a set; here both
+     * are single facts about one deployable thing, which is what an engagement is scoped to.
+     *
+     * <p>{@code accessPath} is passed through as the tenant's own value and never ranked. Whether
+     * "PUBLIC" is more exposed than "ZTNA" is a judgement about a tenant-configured vocabulary, and
+     * ADR-027 forbids the code holding an opinion about values it did not define.
+     */
+    public record ProjectRef(String assetId, String projectId, String name, Integer apiCount,
+            String accessPath, String lifecycleState, long plannedWindows) {
     }
 
     /** One month of planned load, for the capacity chart. */
@@ -229,12 +257,39 @@ public final class AssessmentPlanQuery {
                           JOIN request_board b ON b.id = ar.request_id
                          WHERE ar.asset_id = a.id
                            AND coalesce(b.state_category, '') <> 'TERMINAL'),
-                       coalesce(p.critical_open, 0) + coalesce(p.high_open, 0)
+                       coalesce(p.critical_open, 0) + coalesce(p.high_open, 0),
+                       a.exposure_declared,
+                       -- Summed over the application's projects, where the inventory declares it.
+                       -- The regex guard is not paranoia: `attributes` is jsonb and a declared field
+                       -- can be retyped from TEXT to INTEGER after values exist, which leaves a cast
+                       -- that fails the whole page rather than one cell.
+                       sz.api_count, coalesce(sz.project_count, 0),
+                       coalesce(pw.planned, 0)
                   FROM asset a
                   JOIN asset_type t ON t.id = a.type_id AND t.code = 'APPLICATION'
                   LEFT JOIN application_review_cadence c ON c.asset_id = a.id
                   LEFT JOIN criticality_tier ct ON ct.id = a.criticality_tier_id
                   LEFT JOIN application_posture p ON p.asset_id = a.id
+                  LEFT JOIN LATERAL (
+                      SELECT sum(CASE WHEN pr.attributes ->> 'api_count' ~ '^[0-9]+$'
+                                      THEN (pr.attributes ->> 'api_count')::int END) AS api_count,
+                             count(*) AS project_count
+                        FROM asset_composition cc
+                        JOIN asset pr ON pr.id = cc.asset_id
+                        JOIN asset_type pt ON pt.id = pr.type_id AND pt.code = 'PROJECT'
+                       WHERE cc.root_id = a.id AND pr.lifecycle_state <> 'RETIRED'
+                  ) sz ON true
+                  -- The plan for this application AND for its projects: a window on a project is a
+                  -- window on the application as far as "is this target planned" is concerned, and a
+                  -- planner who scheduled the parts must not be told the whole is unplanned.
+                  LEFT JOIN LATERAL (
+                      SELECT count(*) AS planned
+                        FROM assessment_plan_window w
+                       WHERE w.state = 'PLANNED'
+                         AND (w.target_asset_id = a.id
+                              OR w.target_asset_id IN (SELECT cc.asset_id FROM asset_composition cc
+                                                        WHERE cc.root_id = a.id))
+                  ) pw ON true
                  WHERE a.lifecycle_state <> 'RETIRED' AND %s%s%s
                  -- Overdue first, then never assessed, then soonest due. Alphabetical would be
                  -- tidier and would bury the row somebody opened this page to find.
@@ -246,7 +301,10 @@ public final class AssessmentPlanQuery {
         return read(principal, sql, binder, r -> new PlanRow(r.getString(1), r.getString(2),
                 r.getString(3), r.getString(4), r.getLong(5), r.getLong(6), r.getLong(7),
                 r.getString(8), r.getObject(9) == null ? null : Integer.valueOf(r.getInt(9)),
-                r.getString(10), r.getString(11), r.getLong(12), r.getLong(13)));
+                r.getString(10), r.getString(11), r.getLong(12), r.getLong(13),
+                r.getString(14),
+                r.getObject(15) == null ? null : Integer.valueOf(r.getInt(15)),
+                r.getLong(16), r.getLong(17)));
     }
 
     /**
@@ -393,7 +451,13 @@ public final class AssessmentPlanQuery {
         Binder binder = new Binder();
         String orgClause = orgClause("app.owning_node_id", filter, binder);
         String sql = """
-                SELECT app.id::text, pr.id::text, pr.display_name
+                SELECT app.id::text, pr.id::text, pr.display_name,
+                       CASE WHEN pr.attributes ->> 'api_count' ~ '^[0-9]+$'
+                            THEN (pr.attributes ->> 'api_count')::int END,
+                       pr.attributes ->> 'access_path',
+                       pr.lifecycle_state,
+                       (SELECT count(*) FROM assessment_plan_window w
+                         WHERE w.target_asset_id = pr.id AND w.state = 'PLANNED')
                   FROM asset app
                   JOIN asset_type at ON at.id = app.type_id AND at.code = 'APPLICATION'
                   JOIN asset_composition cc ON cc.root_id = app.id
@@ -404,7 +468,9 @@ public final class AssessmentPlanQuery {
                  ORDER BY app.display_name, pr.display_name
                 """.formatted(inScope("app.owning_node_id"), orgClause);
         return read(principal, sql, binder,
-                r -> new ProjectRef(r.getString(1), r.getString(2), r.getString(3)));
+                r -> new ProjectRef(r.getString(1), r.getString(2), r.getString(3),
+                        r.getObject(4) == null ? null : Integer.valueOf(r.getInt(4)),
+                        r.getString(5), r.getString(6), r.getLong(7)));
     }
 
     /** One selectable filter option, with how much work sits behind it. */

@@ -66,6 +66,10 @@ public final class PlatformEventTypes {
             "alert_webhook",
             "ai_provider",
             "full_review_policy",
+            // A planned assessment window. A separate aggregate from `assessment_request` on
+            // purpose: the plan and the record of work must be able to disagree, and an event that
+            // said "assessment_request" for a window would put a plan into the history of work.
+            "assessment_plan_window",
             "rescan_schedule",
             "password_policy");
 

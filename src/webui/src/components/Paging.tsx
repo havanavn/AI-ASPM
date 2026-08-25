@@ -132,18 +132,29 @@ export function PageSize({ size, onChange }: { size: number; onChange: (size: nu
 /**
  * The footer under a paged table: what is being shown, out of how many, and the way to move.
  *
- * <p>Renders nothing when the whole set fits in the smallest offered page. A pager under four rows
- * is a control that does nothing, and a reader who tries it once learns to stop reading the footer.
- *
  * <p>"Showing 21–40 of 208" rather than "Page 2 of 11". The row numbers are the question somebody
  * scanning a long table actually has, and the page number is an implementation detail of the answer.
+ *
+ * <h2>The count is always shown; only the navigation comes and goes</h2>
+ *
+ * This footer used to disappear entirely whenever the whole set fitted on one page. The reasoning was
+ * that a pager under four rows is furniture — which is true of the BUTTONS and false of everything
+ * else in the footer. Reported from use on an estate with three applications in it: the reader saw a
+ * table with no count, no rows-per-page control and no footer, and concluded the table had no paging
+ * at all and would silently truncate once the estate grew. The absence was doing the opposite of what
+ * it was meant to do.
+ *
+ * <p>So the row count and the size control are unconditional: "Showing 1–3 of 3 applications" is the
+ * table stating its own extent, which is the same claim product principle 1 makes everywhere else —
+ * a reader must be able to tell a short list from a truncated one. Previous and Next appear only when
+ * there is a second page to reach, because those genuinely do nothing on a single-page table.
+ *
+ * <p>Nothing renders for an empty set. The tables that use this already say why they are empty, in
+ * their own words, and "Showing 0–0 of 0" underneath that says less than the sentence above it.
  */
 export function Pager<T>({ paging, unit = "rows" }: { paging: Paging<T>; unit?: string }) {
   const { page, setPage, size, setSize, pages, total, from, to } = paging;
-  // Hidden when everything already fits — a pager on a single-page table is furniture. Compared with
-  // the ACTUAL page size rather than with the smallest offered one: a table asking for ten per page and
-  // holding eleven rows has a second page, and the reader needs to be told it exists.
-  if (total <= size) {
+  if (total === 0) {
     return null;
   }
   return (
@@ -153,17 +164,22 @@ export function Pager<T>({ paging, unit = "rows" }: { paging: Paging<T>; unit?: 
       </span>
       <div className="flex items-center gap-3">
         <PageSize size={size} onChange={setSize} />
-        <div className="flex items-center gap-2">
-          <span className="tabular text-muted-foreground">Page {page + 1} of {pages}</span>
-          <Button variant="outline" size="sm" disabled={page === 0}
-                  onClick={() => setPage(page - 1)}>
-            <ChevronLeft /> Previous
-          </Button>
-          <Button variant="outline" size="sm" disabled={page + 1 >= pages}
-                  onClick={() => setPage(page + 1)}>
-            Next <ChevronRight />
-          </Button>
-        </div>
+        {/* Only when there is somewhere to go. `pages` is derived from the ACTUAL page size rather
+            than the smallest offered one: a table asking for ten per page and holding eleven rows has
+            a second page, and the reader needs to be told it exists. */}
+        {pages > 1 && (
+          <div className="flex items-center gap-2">
+            <span className="tabular text-muted-foreground">Page {page + 1} of {pages}</span>
+            <Button variant="outline" size="sm" disabled={page === 0}
+                    onClick={() => setPage(page - 1)}>
+              <ChevronLeft /> Previous
+            </Button>
+            <Button variant="outline" size="sm" disabled={page + 1 >= pages}
+                    onClick={() => setPage(page + 1)}>
+              Next <ChevronRight />
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

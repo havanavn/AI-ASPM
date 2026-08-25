@@ -67,6 +67,19 @@ public final class UiApi {
     private static final int REVIEW_CHOICES = 5;
 
     private final aspm.app.resource.SubmissionHealth submissionHealth;
+    private final aspm.app.resource.PlanWindows planWindows;
+
+    /**
+     * The trail an export leaves behind.
+     *
+     * <p>{@code PRD-API-046} requires the scope applied and the record count to appear in the audit
+     * event, not only in the file: the file leaves with the reader and can be edited, so a question
+     * asked later — who took the inventory out, how much of it, and bounded by what — has to be
+     * answerable from the platform rather than from the spreadsheet being asked about. An export is
+     * the one read on these dashboards that produces a copy nobody can call back.
+     */
+    private final aspm.app.audit.AuditTrail audit =
+            new aspm.app.audit.AuditTrail(java.time.Clock.systemUTC());
 
     public UiApi(DataSource dataSource) {
         this.dataSource = Objects.requireNonNull(dataSource, "a data source is required");
@@ -88,6 +101,7 @@ public final class UiApi {
         this.classifier = new aspm.app.resource.FindingClassifier(dataSource);
         this.lifecycle = new aspm.app.resource.FindingLifecycle(dataSource);
         this.submissionHealth = new aspm.app.resource.SubmissionHealth(dataSource);
+        this.planWindows = new aspm.app.resource.PlanWindows(dataSource);
     }
 
     /**
@@ -126,6 +140,12 @@ public final class UiApi {
             entry.put("status", row.status());
             entry.put("openRequests", row.openRequests());
             entry.put("severeOpen", row.severeOpen());
+            // What a planner sizes the engagement from. apiCount is null, never 0, where nothing
+            // declared one — a target whose API count nobody recorded is not a target with no APIs.
+            entry.put("exposureDeclared", row.exposureDeclared());
+            entry.put("apiCount", row.apiCount());
+            entry.put("projectCount", row.projectCount());
+            entry.put("plannedWindows", row.plannedWindows());
             rows.add(entry);
         }
         List<Map<String, Object>> bars = new ArrayList<>();
@@ -151,8 +171,18 @@ public final class UiApi {
         }
         List<Map<String, Object>> projects = new ArrayList<>();
         for (var project : plan.projects(principal, filter)) {
-            projects.add(Map.of("assetId", project.assetId(), "projectId", project.projectId(),
-                    "name", project.name()));
+            // A LinkedHashMap and not Map.of: apiCount and accessPath are null for a project that
+            // declared neither, and Map.of throws on a null value — which would take the whole
+            // planning page out over an undeclared field, the commonest state on a fresh estate.
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("assetId", project.assetId());
+            entry.put("projectId", project.projectId());
+            entry.put("name", project.name());
+            entry.put("apiCount", project.apiCount());
+            entry.put("accessPath", project.accessPath());
+            entry.put("lifecycleState", project.lifecycleState());
+            entry.put("plannedWindows", project.plannedWindows());
+            projects.add(entry);
         }
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("rows", rows);
@@ -181,7 +211,186 @@ public final class UiApi {
         body.put("mayManagePolicy", Boolean.valueOf(
                 principal.holds(aspm.app.resource.ReviewPolicyService.MANAGE)));
         body.put("maySchedule", Boolean.valueOf(principal.holds("asm.request.create")));
+        // The planned windows, over the SAME range the Gantt was asked for. A plan fetched over a
+        // different span than the bars beside it would draw a window with no lane to sit in.
+        java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneOffset.UTC);
+        List<Map<String, Object>> windows = new ArrayList<>();
+        for (var window : planWindows.inRange(principal,
+                today.minusMonths(back).withDayOfMonth(1),
+                today.plusMonths(ahead).withDayOfMonth(1).plusMonths(1).minusDays(1))) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("id", window.id());
+            entry.put("targetAssetId", window.targetAssetId());
+            entry.put("targetName", window.targetName());
+            entry.put("targetTypeCode", window.targetTypeCode());
+            entry.put("startsOn", window.startsOn());
+            entry.put("endsOn", window.endsOn());
+            entry.put("note", window.note());
+            entry.put("state", window.state());
+            entry.put("requestId", window.requestId());
+            entry.put("requestCode", window.requestCode());
+            windows.add(entry);
+        }
+        body.put("windows", windows);
+        // Planning is a narrower authority than raising a request and a wider one than reading the
+        // plan. asm.request.schedule already exists for "decide when work happens", which is exactly
+        // what a window is; a new permission would need granting in every tenant before the feature
+        // worked anywhere, and ADR-027 fixes the catalogue at product level for that reason.
+        body.put("mayPlan", Boolean.valueOf(principal.holds(PLAN_WINDOW_PERMISSION)));
         return json(body);
+    }
+
+    /**
+     * The permission that decides who may lay out a plan.
+     *
+     * <p>{@code asm.request.schedule} — "decide when work happens" — rather than a new entry in the
+     * catalogue. ADR-027 fixes the permission catalogue at product level, so a new permission is one
+     * every existing tenant has to grant before the feature works for anybody; reusing the one whose
+     * meaning already covers this costs nothing and locks nobody out. It is deliberately NOT
+     * {@code asm.request.create}: planning a year is not raising a request, and the two authorities
+     * separate cleanly in an estate where a security lead plans and a team raises.
+     */
+    public static final String PLAN_WINDOW_PERMISSION = "asm.request.schedule";
+
+    /**
+     * {@code POST /api/ui/assessment-plan/windows}. Laying out planned assessment windows.
+     *
+     * <p>Bulk by construction. The interface proposes a year at a time — four quarters across every
+     * selected application — and one round trip per window would make a plan for forty applications a
+     * hundred and sixty requests, any of which can fail on its own and leave a half-saved plan nobody
+     * can tell from a plan somebody meant.
+     *
+     * <p>A target the caller cannot reach refuses the WHOLE batch, and the response says how many were
+     * refused but never which: a list of refused identifiers is an existence oracle over the estate
+     * ({@code SEC-AUZ-020}), and the count is what the planner needs to know something is wrong.
+     */
+    public Dispatcher.Response planWindowsCreate(Dispatcher.Request request) throws Exception {
+        Principal principal = request.principal();
+        Map<String, Object> payload = request.body().orElse(Map.of());
+        Object raw = payload.get("windows");
+        if (!(raw instanceof List<?> list) || list.isEmpty()) {
+            return rejected("WINDOWS_REQUIRED", "windows",
+                    "send at least one window: a target, a start date and an end date");
+        }
+        List<aspm.app.resource.PlanWindows.Draft> drafts = new ArrayList<>();
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> m)) {
+                return rejected("WINDOW_MALFORMED", "windows", "each window must be an object");
+            }
+            Map<String, Object> window = castMap(m);
+            UUID target = uuid(text(window.get("targetAssetId")));
+            java.time.LocalDate startsOn = date(window.get("startsOn"));
+            java.time.LocalDate endsOn = date(window.get("endsOn"));
+            if (target == null) {
+                return rejected("TARGET_REQUIRED", "targetAssetId",
+                        "a window is for an application or a project");
+            }
+            if (startsOn == null || endsOn == null) {
+                return rejected("DATES_REQUIRED", "startsOn",
+                        "a window needs a start date and an end date, both as YYYY-MM-DD");
+            }
+            if (endsOn.isBefore(startsOn)) {
+                return rejected("DATES_ORDERED", "endsOn",
+                        "the end of a window cannot fall before its start");
+            }
+            drafts.add(new aspm.app.resource.PlanWindows.Draft(target, startsOn, endsOn,
+                    uuid(text(window.get("assessmentTypeId"))),
+                    uuid(text(window.get("triggerId"))), text(window.get("note"))));
+        }
+        aspm.app.resource.PlanWindows.Created created;
+        try {
+            created = planWindows.create(principal, drafts);
+        } catch (IllegalArgumentException refused) {
+            return rejected("WINDOW_REFUSED", "windows", refused.getMessage());
+        }
+        if (created.refusedTargets() > 0) {
+            // Indistinguishable from "no such application", which is the point.
+            return Dispatcher.Response.notFound();
+        }
+        return json(Map.of("created", Integer.valueOf(created.windows())));
+    }
+
+    /**
+     * {@code PATCH /api/ui/assessment-plan/windows/{id}}. Moving, cancelling or discharging one window.
+     *
+     * <p>One endpoint for all three because they are the same act from the planner's side — the plan
+     * changed — and because a window has no workflow: it is not a request, so there is no transition
+     * to guard. {@code state} carries which: absent means the dates and note are being edited,
+     * {@code CANCELLED} drops it from the plan without deleting the row, {@code PLANNED} puts it back,
+     * and {@code CONVERTED} with a {@code requestId} records that it became work.
+     *
+     * <p>404 for a window outside the caller's scope, for one that does not exist, and for a request
+     * identifier the caller cannot see — the same answer for all three ({@code SEC-AUZ-020}).
+     */
+    public Dispatcher.Response planWindowUpdate(Dispatcher.Request request) throws Exception {
+        Principal principal = request.principal();
+        UUID id = uuid(request.pathVariables().get("id"));
+        if (id == null) {
+            return Dispatcher.Response.notFound();
+        }
+        Map<String, Object> payload = request.body().orElse(Map.of());
+        String state = text(payload.get("state"));
+        java.util.Optional<UUID> applied;
+        if (state == null) {
+            java.time.LocalDate startsOn = date(payload.get("startsOn"));
+            java.time.LocalDate endsOn = date(payload.get("endsOn"));
+            if (startsOn == null || endsOn == null) {
+                return rejected("DATES_REQUIRED", "startsOn",
+                        "moving a window needs both dates, both as YYYY-MM-DD");
+            }
+            if (endsOn.isBefore(startsOn)) {
+                return rejected("DATES_ORDERED", "endsOn",
+                        "the end of a window cannot fall before its start");
+            }
+            applied = planWindows.update(principal, id, startsOn, endsOn,
+                    uuid(text(payload.get("assessmentTypeId"))),
+                    uuid(text(payload.get("triggerId"))), text(payload.get("note")));
+        } else {
+            applied = switch (state) {
+                case "CANCELLED" -> planWindows.cancel(principal, id);
+                case "PLANNED" -> planWindows.restore(principal, id);
+                case "CONVERTED" -> {
+                    UUID requestId = uuid(text(payload.get("requestId")));
+                    yield requestId == null ? java.util.Optional.<UUID>empty()
+                            : planWindows.markConverted(principal, id, requestId);
+                }
+                default -> java.util.Optional.<UUID>empty();
+            };
+        }
+        return applied.isPresent() ? json(Map.of("id", id.toString()))
+                : Dispatcher.Response.notFound();
+    }
+
+    /**
+     * A date from the wire, or null.
+     *
+     * <p>Refuses rather than guesses. An unparseable date reaching the database as null would create a
+     * window the planner did not ask for, and one silently coerced to today would put work in the
+     * wrong quarter — both worse than the field coming back as required.
+     */
+    /**
+     * A refused write, in the shape this class already uses inline elsewhere.
+     *
+     * <p>{@code status} duplicated into the body is that existing shape, not a new one — the interface
+     * reads the code, and a body that carries its own status is what the other rejections here send.
+     * {@code field} is added so a form can mark the input rather than showing a banner nobody can act
+     * on; it is the one thing the inline rejections could not carry.
+     */
+    private static Dispatcher.Response rejected(String code, String field, String message) {
+        return new Dispatcher.Response(400,
+                Map.of("status", 400, "code", code, "field", field, "message", message), Map.of());
+    }
+
+    private static java.time.LocalDate date(Object value) {
+        String text = text(value);
+        if (text == null) {
+            return null;
+        }
+        try {
+            return java.time.LocalDate.parse(text);
+        } catch (java.time.format.DateTimeParseException malformed) {
+            return null;
+        }
     }
 
     /**
@@ -972,6 +1181,7 @@ public final class UiApi {
         var names = vulnerabilities.namesFor(request.principal(), mentioned);
         var about = new aspm.app.resource.Workbook.Sheet("Filter",
                 List.of("Filter", "Value"), filterSheet(request, rows.size(), names));
+        auditExport(request.principal(), "findings", rows.size(), request.query());
         String stamp = java.time.LocalDate.now(java.time.ZoneOffset.UTC).toString();
         return new Dispatcher.Response(200,
                 new aspm.app.ui.InterfaceResource.Binary(
@@ -2215,6 +2425,269 @@ public final class UiApi {
         return json(body);
     }
 
+    /**
+     * {@code GET /api/ui/applications/export} — the application inventory as a spreadsheet.
+     *
+     * <h2>It calls the list, and that is the point</h2>
+     *
+     * <p>The export runs {@link #applications} and serialises what came back. There is one producer,
+     * so a column the screen shows is a column the file has and a filter that narrows one narrows the
+     * other. The alternative — a second query shaped like the first — is two definitions of "the
+     * inventory" that agree on the day they are written and diverge on the next change to either.
+     *
+     * <p>Every declared field the tenant offers is a column, not only the ones the reader has ticked.
+     * Column choice is a display preference held in their browser; a file that silently omitted a
+     * recorded fact because somebody had not ticked it would be a worse export than one that is wide.
+     *
+     * <h2>The second sheet is not decoration</h2>
+     *
+     * <p>It records what the file was filtered by, how many rows it holds, and that the rows are what
+     * this caller can see. Without it the file becomes "the inventory" in somebody's slide three
+     * months later and nobody can say what it was a view of — the same reason the findings export
+     * carries one.
+     */
+    public Dispatcher.Response applicationsExport(Dispatcher.Request request) throws Exception {
+        Dispatcher.Response listing = applications(request);
+        if (listing.status() != 200 || !(listing.body() instanceof Map<?, ?> raw)) {
+            // Whatever refused the list refuses the export, unchanged. A 404 for a node outside the
+            // caller's scope must not become a spreadsheet with no rows in it.
+            return listing;
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = (Map<String, Object>) raw;
+
+        List<Map<String, Object>> fields = asList(body.get("projectFields"));
+        List<String> headers = new ArrayList<>(List.of(
+                "Application", "Organization", "Organization path", "Owner type", "Criticality",
+                "Criticality inherited", "Exposure declared", "Exposure observed",
+                "Exposure conflict", "Who uses it", "Risk score", "Risk band", "Risk coverage",
+                "Projects", "Findings open", "Assessment requests", "Full reviews done",
+                "Last full review", "Lifecycle"));
+        for (Map<String, Object> field : fields) {
+            headers.add(String.valueOf(field.get("label")));
+        }
+
+        List<List<String>> cells = new ArrayList<>();
+        for (Map<String, Object> row : asList(body.get("rows"))) {
+            List<String> line = new ArrayList<>();
+            line.add(cell(row.get("name")));
+            line.add(cell(row.get("owningNodeName")));
+            line.add(String.join(" › ", asStrings(row.get("ancestorNames"))));
+            line.add(cell(row.get("owningNodeTypeCode")));
+            line.add(cell(row.get("criticalityCode")));
+            line.add(Boolean.TRUE.equals(row.get("criticalityInherited")) ? "yes" : "no");
+            line.add(cell(row.get("exposureDeclared")));
+            line.add(cell(row.get("exposureObserved")));
+            line.add(Boolean.TRUE.equals(row.get("exposureConflict")) ? "yes" : "no");
+            line.add(cell(row.get("userBase")));
+            // An unmeasured score has no numeral form (PRD-UIX-022). The word travels into the
+            // spreadsheet rather than a zero, because a zero in a column somebody sorts by is a
+            // claim that this application was scored and scored nothing.
+            line.add(row.get("riskValue") == null ? "not scored" : cell(row.get("riskValue")));
+            line.add(cell(row.get("riskBand")));
+            line.add(cell(row.get("riskCoverage")));
+            line.add(cell(row.get("projectCount")));
+            line.add(cell(row.get("findingCount")));
+            line.add(cell(row.get("requestCount")));
+            Object cadence = row.get("cadence");
+            Map<String, Object> pace = cadence instanceof Map<?, ?> m ? castMap(m) : Map.of();
+            line.add(cell(pace.get("completed")));
+            line.add(pace.get("lastAt") == null ? "never" : cell(pace.get("lastAt")));
+            line.add(cell(row.get("lifecycleState")));
+
+            Object folded = row.get("projectAttributes");
+            Map<String, Object> values = folded instanceof Map<?, ?> m ? castMap(m) : null;
+            for (Map<String, Object> field : fields) {
+                if (values == null) {
+                    // No project at all, which is not the same as a project that recorded nothing.
+                    // The distinction survives into the file.
+                    line.add("no projects");
+                    continue;
+                }
+                line.add(flatten(values.get(String.valueOf(field.get("key")))));
+            }
+            cells.add(line);
+        }
+
+        var sheet = new aspm.app.resource.Workbook.Sheet("Applications", headers, cells);
+        var about = new aspm.app.resource.Workbook.Sheet("Filter", List.of("Filter", "Value"),
+                inventoryFilterSheet(request, cells.size(), fields.size()));
+        // Written before the bytes are handed over: an audit failure must not leave a delivered file
+        // with no event behind it (PRD-API-046).
+        auditExport(request.principal(), "application_inventory", cells.size(), request.query());
+        String stamp = java.time.LocalDate.now(java.time.ZoneOffset.UTC).toString();
+        return new Dispatcher.Response(200,
+                new aspm.app.ui.InterfaceResource.Binary(
+                        aspm.app.resource.Workbook.write(List.of(sheet, about))),
+                Map.of("Content-Type",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        "Content-Disposition",
+                        "attachment; filename=\"application-inventory-" + stamp + ".xlsx\""));
+    }
+
+    /**
+     * Records that a copy of tenant data left the platform, with the scope it was bounded by and the
+     * number of records in it. {@code PRD-API-046}.
+     *
+     * <p><b>The write is not best-effort.</b> If the trail cannot be written the export fails and no
+     * file is produced, because product principle 5 makes the record of what happened inviolable and
+     * principle 9 forbids degrading quietly. An export that succeeded while its audit event was lost
+     * is indistinguishable afterwards from an export that never happened — which is precisely the
+     * question this event exists to answer.
+     *
+     * <p>The scope recorded is the organization node the caller narrowed to, resolved through
+     * {@code AuditScopes} so it is the same node identity the rest of the trail uses. A caller who
+     * narrowed to nothing exported their whole reach, and a null node says exactly that: the reach
+     * itself is a property of the credential, which the event already carries through the principal,
+     * so restating it here would be a second, divergent definition of scope.
+     *
+     * @param filters the request's own query parameters, recorded as given — the declared-field and
+     *     endpoint filter names are tenant data ({@code ADR-027}), so a label invented here would not
+     *     match what the reader saw on screen
+     */
+    private void auditExport(Principal principal, String what, int records,
+            Map<String, String> filters) throws java.sql.SQLException {
+        java.util.UUID node = null;
+        String requested = filters.get("node");
+        if (requested != null && !requested.isBlank()) {
+            try {
+                node = java.util.UUID.fromString(requested.strip());
+            } catch (IllegalArgumentException malformed) {
+                // The listing already refused a node it could not parse, so reaching here means the
+                // value is unusable but harmless. Record the export without it rather than lose the
+                // event to a filter value.
+                node = null;
+            }
+        }
+        Map<String, Object> applied = new java.util.LinkedHashMap<>();
+        applied.put("export", what);
+        applied.put("records", Integer.valueOf(records));
+        applied.put("scope_node", node == null ? "the caller's whole reach" : node.toString());
+        for (Map.Entry<String, String> parameter : filters.entrySet()) {
+            if (parameter.getValue() != null && !parameter.getValue().isBlank()) {
+                applied.put("filter." + parameter.getKey(), parameter.getValue());
+            }
+        }
+        try (java.sql.Connection connection =
+                aspm.app.persistence.TenantConnections.open(dataSource, principal)) {
+            audit.event(connection, principal,
+                    aspm.kernel.audit.contract.AuditEventType.EXPORT_GENERATED, null,
+                    node == null ? null : aspm.app.audit.AuditScopes.ofNode(connection, node),
+                    applied);
+            // TenantConnections opens a transaction and refuses to commit on close, so the event has
+            // to say it is complete here or it is rolled back and the export fails with it.
+            connection.commit();
+        }
+    }
+
+    /** What the export was filtered by, so the file can never be read as the whole estate. */
+    private List<List<String>> inventoryFilterSheet(Dispatcher.Request request, int exported,
+            int declaredColumns) {
+        Map<String, String> q = request.query();
+        List<List<String>> out = new ArrayList<>();
+        out.add(List.of("Exported at (UTC)", java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC)
+                .withNano(0).toString()));
+        out.add(List.of("Applications in this file", String.valueOf(exported)));
+        out.add(List.of("Declared-field columns", String.valueOf(declaredColumns)));
+        for (String[] entry : List.of(
+                new String[] {"q", "Name search"},
+                new String[] {"node", "Organization"},
+                new String[] {"criticality", "Criticality"},
+                new String[] {"exposure", "Exposure"},
+                new String[] {"lifecycle", "Lifecycle"},
+                new String[] {"reviews", "Full reviews done"},
+                new String[] {"atLeast", "…or more"},
+                new String[] {"sort", "Sorted by"},
+                new String[] {"dir", "Direction"})) {
+            String value = q.get(entry[0]);
+            if (value != null && !value.isBlank()) {
+                out.add(List.of(entry[1], value));
+            }
+        }
+        // The declared-field and endpoint filters, whose names are tenant data — listed as they were
+        // given rather than mapped, because a label this file invented would not match the screen.
+        for (Map.Entry<String, String> parameter : q.entrySet()) {
+            String key = parameter.getKey();
+            if (parameter.getValue() == null || parameter.getValue().isBlank()) {
+                continue;
+            }
+            if (key.startsWith("attr.")) {
+                out.add(List.of("Field " + key.substring("attr.".length()), parameter.getValue()));
+            } else if (key.startsWith("host.")) {
+                out.add(List.of("Host in " + key.substring("host.".length()) + " contains",
+                        parameter.getValue()));
+            } else if (key.startsWith("hostState.")) {
+                out.add(List.of("Host in " + key.substring("hostState.".length()),
+                        parameter.getValue()));
+            }
+        }
+        if (out.size() == 3) {
+            out.add(List.of("Filters", "none — every application in scope"));
+        }
+        out.add(List.of("Scope", "What this caller can see. A scoped reader exports their own "
+                + "subtree, so a short file may mean a small estate or a narrow scope."));
+        out.add(List.of("Not in this file", "Finding detail and evidence. Finding content is "
+                + "attacker-authored by design and is served from the evidence path, not from an "
+                + "inventory export."));
+        return out;
+    }
+
+    private static List<Map<String, Object>> asList(Object raw) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        if (raw instanceof List<?> list) {
+            for (Object item : list) {
+                if (item instanceof Map<?, ?> map) {
+                    out.add(castMap(map));
+                }
+            }
+        }
+        return out;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> castMap(Map<?, ?> map) {
+        return (Map<String, Object>) map;
+    }
+
+    private static List<String> asStrings(Object raw) {
+        List<String> out = new ArrayList<>();
+        if (raw instanceof List<?> list) {
+            for (Object item : list) {
+                out.add(String.valueOf(item));
+            }
+        }
+        return out;
+    }
+
+    /** A cell. A MULTI_SELECT and an application's folded values are both lists; a cell is text. */
+    private static String flatten(Object value) {
+        if (value == null) {
+            return "";
+        }
+        if (value instanceof List<?> list) {
+            List<String> parts = new ArrayList<>();
+            for (Object item : list) {
+                parts.add(String.valueOf(item));
+            }
+            return String.join(", ", parts);
+        }
+        if (value instanceof Boolean flag) {
+            return flag ? "yes" : "no";
+        }
+        return String.valueOf(value);
+    }
+
+    /**
+     * One spreadsheet cell.
+     *
+     * <p>Not {@code text(Object)}, which already exists here and returns NULL for an absent value —
+     * right for reading a payload, wrong for a cell, where null becomes the four characters "null"
+     * in somebody's report.
+     */
+    private static String cell(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
     /** {@code GET /api/ui/applications/{id}}. */
     public Dispatcher.Response application(Dispatcher.Request request) throws Exception {
         Principal principal = request.principal();
@@ -2891,6 +3364,9 @@ public final class UiApi {
         String subject = name.orElse("export");
         String stamp = java.time.LocalDate.now().toString();
         String safe = subject.replaceAll("[^A-Za-z0-9._-]+", "-");
+        // Both formats are the same egress with the same obligation: a CycloneDX document is no less
+        // a copy of the estate's components than the spreadsheet is.
+        auditExport(request.principal(), "components", rows.size(), request.query());
 
         if ("cyclonedx".equalsIgnoreCase(request.query().getOrDefault("format", "xlsx"))) {
             return new Dispatcher.Response(200,

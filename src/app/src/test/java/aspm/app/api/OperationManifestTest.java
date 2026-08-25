@@ -284,6 +284,14 @@ class OperationManifestTest {
                 case "/api/ui/assessment-plan" ->
                         List.of("PRD-AST-001", "PRD-ASM-003", "PRD-CAP-005", "PRD-UIX-011",
                                 "SEC-AUZ-016");
+                // The plan. PRD-ASM-015 is the dated window itself; -016 keeps it out of every
+                // in-flight figure; -017 is several per year and the retained cancellation; -018 the
+                // explicit conversion. SEC-AUZ-016 the scope predicate, applied over every target in
+                // a batch inside the transaction that writes it.
+                case "/api/ui/assessment-plan/windows",
+                     "/api/ui/assessment-plan/windows/{id}" ->
+                        List.of("PRD-ASM-015", "PRD-ASM-016", "PRD-ASM-017", "PRD-ASM-018",
+                                "SEC-AUZ-016");
                 case "/api/ui/applications/{id}/posture", "/api/ui/projects/{id}/posture" ->
                         List.of("PRD-AST-001", "PRD-UIX-011", "PRD-UIX-022", "SEC-AUZ-016");
                 // Projects. PRD-AST-001 is the asset inventory, PRD-AST-005 the ownership claim a
@@ -340,6 +348,12 @@ class OperationManifestTest {
                 // the relationships it draws; PRD-ORG-001 the organization tree it crosses into;
                 // SEC-AUZ-016 the scope predicate, applied at retrieval because a graph is an
                 // aggregate and filtering one afterwards is how a node nobody may see gets drawn.
+                // The inventory export. PRD-AST-001 is the aggregate it lists; PRD-API-046 the
+                // obligation an export carries — the scope applied and the record count, stated in
+                // the file AND in the audit event; SEC-AUZ-016 the scope predicate, which it inherits
+                // by calling the list handler rather than by carrying a second copy of it.
+                case "/api/ui/applications/export" ->
+                        List.of("PRD-AST-001", "PRD-API-046", "SEC-AUZ-016");
                 case "/api/ui/graph/{id}" ->
                         List.of("PRD-AST-001", "PRD-AST-004", "PRD-ORG-001", "SEC-AUZ-016");
                 case "/api/ui/settings/environments", "/api/ui/settings/environments/{id}",

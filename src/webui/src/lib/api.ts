@@ -91,6 +91,18 @@ export const api = {
       },
       body: JSON.stringify(body),
     }),
+  // A partial update to one record. Same replay key as post, for the same reason: a retried click
+  // must not be counted as a second decision. The first PATCH this interface makes — the platform
+  // already serves the method on /api/v1, so this adds a caller, not a verb.
+  patch: <T,>(path: string, body: unknown) =>
+    request<T>(path, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": crypto.randomUUID(),
+      },
+      body: JSON.stringify(body),
+    }),
   // Same headers as post. A configuration write is class E, which pairs step-up with a replay key —
   // so the idempotency key is not optional here, it is what stops a retried save from being counted
   // as a second decision.

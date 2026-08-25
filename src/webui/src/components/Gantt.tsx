@@ -29,7 +29,7 @@ export interface GanttBar {
   requestId: string | null;
   code: string | null;
   label: string;
-  kind: "REQUEST" | "FULL_REVIEW" | "PROJECTED";
+  kind: "REQUEST" | "FULL_REVIEW" | "PROJECTED" | "PLANNED";
   startAt: string;
   endAt: string;
   state: string;
@@ -97,10 +97,25 @@ const STATES = [
   { key: "open", label: "In progress", hatch: "none" },
   { key: "closed", label: "Completed", hatch: "none" },
   { key: "projected", label: "Projected — not scheduled", hatch: "sparse" },
+  // A window somebody put in the plan, as distinct from one the interval implies. The two must not
+  // share a texture: "the policy says this is due" and "a person committed to this fortnight" are
+  // different claims, and a planner needs to see which of the two a bar is before moving it.
+  { key: "planned", label: "Planned — no request raised", hatch: "outline" },
 ] as const;
 
 /** The texture for a state, as an inline style. Kept beside {@link STATES} so they cannot drift. */
-function texture(hatch: "dense" | "sparse" | "none"): Record<string, string> {
+function texture(hatch: "dense" | "sparse" | "none" | "outline"): Record<string, string> {
+  if (hatch === "outline") {
+    // Hollow: the bar's outline is the commitment, and the empty middle is the work not yet raised.
+    // It reads as unfilled in greyscale and to a reader who cannot separate the fill hues at all,
+    // which is the whole reason it is a shape and not a shade.
+    return {
+      backgroundImage: "none",
+      backgroundColor: "transparent",
+      borderStyle: "dashed",
+      borderWidth: "1.5px",
+    };
+  }
   if (hatch === "dense") {
     return {
       backgroundImage:
@@ -119,10 +134,12 @@ function texture(hatch: "dense" | "sparse" | "none"): Record<string, string> {
 
 function kindOf(bar: GanttBar): keyof typeof KINDS {
   return bar.fullReview || bar.kind === "FULL_REVIEW" || bar.kind === "PROJECTED"
+      || bar.kind === "PLANNED"
     ? "FULL_REVIEW" : "REQUEST";
 }
 
 function stateOf(bar: GanttBar): (typeof STATES)[number]["key"] {
+  if (bar.kind === "PLANNED") return "planned";
   if (bar.kind === "PROJECTED") return "projected";
   if (bar.overdue) return "overdue";
   return bar.open ? "open" : "closed";

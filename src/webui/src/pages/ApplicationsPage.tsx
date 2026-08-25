@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Info, Plus, Search, X } from "lucide-react";
+import { Download, Info, Plus, Search, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { Kpi } from "@/components/Kpi";
 import { Badge } from "@/components/ui/badge";
@@ -213,6 +213,22 @@ export function ApplicationsPage() {
           <AttributeFilters fields={data.projectFields} params={params} onChange={setParam} />
           <ColumnPicker fields={data.projectFields} chosen={columns.chosen} label="Project fields"
                         onToggle={columns.toggle} onMove={columns.move} onClear={columns.clear} />
+          {/* A link, not a fetch. The browser downloads it with the session cookie attached, so
+              nothing has to hold a spreadsheet in memory to hand it to a download.
+
+              The query string is the page's own, so the file contains exactly what the screen shows —
+              the same filters, the same declared-field columns, the same order. It carries a second
+              sheet naming those filters, and the export is recorded in the audit trail with its scope
+              and its record count (PRD-API-046), because a copy of the inventory that has left the
+              platform cannot be called back and the question asked afterwards is who took it. */}
+          {data.rows.length > 0 && (
+            <Button asChild variant="secondary" size="sm">
+              <a href={`/api/ui/applications/export?${query}`}>
+                <Download className="size-3.5" /> Export {data.rows.length}
+                {data.rows.length === 1 ? " application" : " applications"}
+              </a>
+            </Button>
+          )}
           {params.toString() !== "" && (
             <Button variant="ghost" size="sm"
                     onClick={() => { setQ(""); setParams(new URLSearchParams(), { replace: true }); }}>

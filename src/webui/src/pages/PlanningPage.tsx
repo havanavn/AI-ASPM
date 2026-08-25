@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { CalendarClock, CalendarPlus, Search, X } from "lucide-react";
+import {
+  CalendarClock, CalendarPlus, ChevronDown, ChevronRight, Search, Trash2, X,
+} from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { BarList, GroupedColumns, type Slice } from "@/components/Charts";
@@ -14,24 +16,50 @@ import { PageSize, Pager, usePaging } from "@/components/Paging";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MultiSelect } from "@/components/MultiSelect";
+import { Checkbox } from "@/components/ui/checkbox";
+import { PlanWindowDialog, type PlanTarget } from "@/components/PlanWindowDialog";
 
 interface PlanRow {
   assetId: string; name: string; orgPath: string | null; criticality: string | null;
   completed: number; inFlight: number; abandoned: number;
   lastReviewAt: string | null; intervalMonths: number | null; nextDueAt: string | null;
   status: string; openRequests: number; severeOpen: number;
+  /** What the engagement is sized from. `apiCount` is null, never 0, where nothing declared one. */
+  exposureDeclared: string | null; apiCount: number | null;
+  projectCount: number; plannedWindows: number;
+}
+/**
+ * A project under an application.
+ *
+ * `apiCount` and `accessPath` are tenant-declared fields on the PROJECT type, which is the reason the
+ * plan breaks down this far: an application's API count is a sum over its projects, and a sum is not
+ * what an engagement is scoped to.
+ */
+interface PlanProject {
+  assetId: string; projectId: string; name: string;
+  apiCount: number | null; accessPath: string | null;
+  lifecycleState: string; plannedWindows: number;
+}
+/** A window somebody put in the plan. Not a request — nothing counts it as work in progress. */
+interface PlanWindow {
+  id: string; targetAssetId: string; targetName: string; targetTypeCode: string;
+  startsOn: string; endsOn: string; note: string | null;
+  state: "PLANNED" | "CONVERTED" | "CANCELLED";
+  requestId: string | null; requestCode: string | null;
 }
 interface Payload {
   rows: PlanRow[];
   bars: GanttBar[];
   load: { label: string; due: number; started: number; closed: number }[];
-  projects: { assetId: string; projectId: string; name: string }[];
+  projects: PlanProject[];
+  windows: PlanWindow[];
   teams: { id: string; name: string; requests: number }[];
   assessors: { id: string; name: string; requests: number }[];
   unassignedRequests: number;
   fullReviewTriggerId: string | null;
   mayManagePolicy: boolean;
   maySchedule: boolean;
+  mayPlan: boolean;
 }
 
 /**
@@ -168,9 +196,17 @@ export function PlanningPage() {
   const searched = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return data?.rows ?? [];
+    // A project name matches its application. Somebody looking for "Settlement" is looking for
+    // whatever contains it, and a search that only reads the application name sends them away
+    // convinced the estate does not hold it.
+    const byProject = new Set(
+      (data?.projects ?? [])
+        .filter((p) => p.name.toLowerCase().includes(needle))
+        .map((p) => p.assetId));
     return (data?.rows ?? []).filter((r) =>
       r.name.toLowerCase().includes(needle)
-      || (r.orgPath ?? "").toLowerCase().includes(needle));
+      || (r.orgPath ?? "").toLowerCase().includes(needle)
+      || byProject.has(r.assetId));
   }, [data, query]);
 
   const rows = useMemo(
@@ -193,12 +229,89 @@ export function PlanningPage() {
   }, [data]);
 
   const projectsByApp = useMemo(() => {
-    const map: Record<string, { projectId: string; name: string }[]> = {};
+    const map: Record<string, PlanProject[]> = {};
     for (const p of data?.projects ?? []) {
-      (map[p.assetId] ??= []).push({ projectId: p.projectId, name: p.name });
+      (map[p.assetId] ??= []).push(p);
     }
     return map;
   }, [data]);
+
+  /**
+   * The planned windows drawn as Gantt bars, on the lane of the application they belong to.
+   *
+   * <p>A window on a PROJECT is drawn on its application's lane, because the chart has one lane per
+   * application and a planner who scheduled the parts needs to see them against the whole. The bar
+   * says which project it is for, so the lane is not lying about the granularity.
+   *
+   * <p>Cancelled windows are dropped here and only here: the plan still holds them — that is
+   * PRD-ASM-017 — but a cancelled fortnight drawn on the timeline is a commitment that is not one.
+   */
+  const plannedBars = useMemo<GanttBar[]>(() => {
+    const appOfProject: Record<string, string> = {};
+    for (const p of data?.projects ?? []) appOfProject[p.projectId] = p.assetId;
+    return (data?.windows ?? [])
+      .filter((w) => w.state === "PLANNED")
+      .map((w) => ({
+        assetId: appOfProject[w.targetAssetId] ?? w.targetAssetId,
+        requestId: null,
+        code: null,
+        label: w.targetTypeCode === "PROJECT"
+          ? `Planned — ${w.targetName}` : "Planned full review",
+        kind: "PLANNED" as const,
+        startAt: w.startsOn,
+        endAt: w.endsOn,
+        state: "PLANNED",
+        open: false,
+        overdue: false,
+        fullReview: true,
+      }));
+  }, [data]);
+
+  /** Request bars and plan bars in one array, so the chart draws both against one axis. */
+  const allBars = useMemo(
+    () => [...(data?.bars ?? []), ...plannedBars], [data, plannedBars]);
+
+  /**
+   * Which applications are ticked for a bulk plan.
+   *
+   * <p>Held against the SEARCHED set rather than the whole payload, and cleared when the filter
+   * changes: a tick somebody made on a row they can no longer see would put a target into a plan they
+   * did not review. The count on the button is therefore always a count of visible rows.
+   */
+  const [ticked, setTicked] = useState<Set<string>>(new Set());
+  const visibleTicked = useMemo(
+    () => rows.filter((r) => ticked.has(r.assetId)), [rows, ticked]);
+
+  /** Which application rows are expanded to show their projects. */
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  function toggleTick(assetId: string) {
+    setTicked((current) => {
+      const next = new Set(current);
+      if (!next.delete(assetId)) next.add(assetId);
+      return next;
+    });
+  }
+
+  function toggleExpand(assetId: string) {
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (!next.delete(assetId)) next.add(assetId);
+      return next;
+    });
+  }
+
+  /** Windows for one target, newest plan first. */
+  const windowsByTarget = useMemo(() => {
+    const map: Record<string, PlanWindow[]> = {};
+    for (const w of data?.windows ?? []) (map[w.targetAssetId] ??= []).push(w);
+    return map;
+  }, [data]);
+
+  async function cancelWindow(id: string) {
+    await api.patch(`/api/ui/assessment-plan/windows/${id}`, { state: "CANCELLED" });
+    setReloads((n) => n + 1);
+  }
 
   /**
    * Where "schedule this review" goes.
@@ -265,10 +378,22 @@ export function PlanningPage() {
 
   const ganttRows = rows.map((r) => ({ id: r.assetId, name: r.name, caption: r.orgPath }));
   const barsForRows = new Set(ganttRows.map((r) => r.id));
-  const ganttBars = data.bars.filter((b) => barsForRows.has(b.assetId))
+  const ganttBars = allBars.filter((b) => barsForRows.has(b.assetId))
     // A projection IS a full review — it is what the cadence says is owed — so it survives the
-    // filter. Dropping it would leave "full reviews only" showing no future work at all.
-    .filter((b) => kinds === "all" || b.fullReview || b.kind === "PROJECTED");
+    // filter. Dropping it would leave "full reviews only" showing no future work at all. A PLANNED
+    // window is the same argument one step further: it is the review somebody committed to.
+    .filter((b) => kinds === "all" || b.fullReview || b.kind === "PROJECTED"
+            || b.kind === "PLANNED");
+
+  /**
+   * How wide one row is, so a full-width cell spans it.
+   *
+   * Computed rather than written as a literal, because the count changes with two permissions and a
+   * hard-coded colSpan silently under-spans for a reader holding one of them — which shows as a
+   * stray empty cell at the end of the expanded row, in their session only.
+   */
+  const columnCount = 12 + (data.mayPlan ? 1 : 0)
+    + (data.mayPlan || data.maySchedule ? 1 : 0);
   // Counted the same way the filter selects, projection included — a number beside a button has to
   // equal what pressing it draws. Counting only kind === "FULL_REVIEW" made the chip read 43 while
   // the filtered chart drew 44, and a reader has no way to tell which of the two is wrong.
@@ -520,37 +645,131 @@ export function PlanningPage() {
               Ordered by urgency — overdue first, then never assessed, then soonest due.
             </CardDescription>
           </div>
-          <PageSize size={paging.size} onChange={paging.setSize} />
+          <span className="flex items-center gap-2">
+            {/* Bulk is the whole answer to "the number of applications is large". Planning a year
+                one application at a time is the work this button exists to remove; the dialog states
+                the multiplication before it commits to it. Disabled rather than hidden when nothing
+                is ticked, so the control explains itself before it is needed. */}
+            {data.mayPlan && (
+              <PlanWindowDialog
+                targets={visibleTicked.map<PlanTarget>((r) => ({
+                  id: r.assetId, name: r.name, typeCode: "APPLICATION",
+                  intervalMonths: r.intervalMonths, plannedWindows: r.plannedWindows,
+                }))}
+                onSaved={() => { setTicked(new Set()); setReloads((n) => n + 1); }}
+                trigger={
+                  <Button size="sm" variant="secondary" disabled={visibleTicked.length === 0}
+                          title={visibleTicked.length === 0
+                            ? "Tick the applications to plan"
+                            : `Plan windows for ${visibleTicked.length} applications`}>
+                    <CalendarPlus className="size-3.5" />
+                    Plan {visibleTicked.length > 0 ? visibleTicked.length : ""} selected
+                  </Button>
+                } />
+            )}
+            <PageSize size={paging.size} onChange={paging.setSize} />
+          </span>
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
               <TableRow>
+                {data.mayPlan && (
+                  <TableHead className="w-8">
+                    {/* Ticks every VISIBLE row, never the whole payload. A control that silently
+                        selected rows behind a filter would put targets into a plan nobody read. */}
+                    <Checkbox
+                      aria-label="Select every application shown"
+                      checked={paging.rows.length > 0
+                        && paging.rows.every((r) => ticked.has(r.assetId))}
+                      onCheckedChange={(v) => setTicked((current) => {
+                        const next = new Set(current);
+                        for (const r of paging.rows) {
+                          if (v === true) next.add(r.assetId); else next.delete(r.assetId);
+                        }
+                        return next;
+                      })} />
+                  </TableHead>
+                )}
                 <TableHead>Application</TableHead>
+                {/* The three facts a planner sizes an engagement from, beside the name rather than a
+                    click away: the decision they inform is made while scanning the list. */}
+                <TableHead>Criticality</TableHead>
+                <TableHead>Exposure</TableHead>
+                <TableHead className="text-right">APIs</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Last full review</TableHead>
                 <TableHead>Interval</TableHead>
                 <TableHead>Next due</TableHead>
+                <TableHead className="text-right">Planned</TableHead>
                 <TableHead className="text-right">In flight</TableHead>
                 <TableHead className="text-right">Open requests</TableHead>
                 <TableHead className="text-right">Critical + high open</TableHead>
-                {data.maySchedule && <TableHead className="w-32" />}
+                {(data.mayPlan || data.maySchedule) && <TableHead className="w-40" />}
               </TableRow>
             </TableHeader>
             <TableBody>
               {paging.rows.map((row) => {
                 const status = STATUS[row.status] ?? UNKNOWN_STATUS;
+                const projects = projectsByApp[row.assetId] ?? [];
+                const windows = (windowsByTarget[row.assetId] ?? [])
+                  .concat(projects.flatMap((pr) => windowsByTarget[pr.projectId] ?? []))
+                  .filter((w) => w.state !== "CANCELLED");
                 return (
-                  <TableRow key={row.assetId}
-                            className={cn(selected === row.assetId && "bg-primary/5")}
+                  <Fragment key={row.assetId}>
+                  <TableRow className={cn(selected === row.assetId && "bg-primary/5")}
                             onMouseEnter={() => setSelected(row.assetId)}>
+                    {data.mayPlan && (
+                      <TableCell>
+                        <Checkbox checked={ticked.has(row.assetId)}
+                                  aria-label={`Select ${row.name}`}
+                                  onCheckedChange={() => toggleTick(row.assetId)} />
+                      </TableCell>
+                    )}
                     <TableCell>
-                      <Link to={`/applications/${row.assetId}`}
-                            className="font-medium hover:text-primary hover:underline">
-                        {row.name}
-                      </Link>
+                      <span className="flex items-center gap-1">
+                        {/* Expand only where there is something behind it. A disclosure control on a
+                            row with no projects teaches the reader that the control does nothing. */}
+                        {(projectsByApp[row.assetId]?.length ?? 0) > 0 ? (
+                          <button type="button" onClick={() => toggleExpand(row.assetId)}
+                                  aria-expanded={expanded.has(row.assetId)}
+                                  aria-label={`${expanded.has(row.assetId) ? "Hide" : "Show"} the `
+                                    + `${projectsByApp[row.assetId]!.length} projects under ${row.name}`}
+                                  className="text-muted-foreground hover:text-foreground">
+                            {expanded.has(row.assetId)
+                              ? <ChevronDown className="size-3.5" />
+                              : <ChevronRight className="size-3.5" />}
+                          </button>
+                        ) : <span className="inline-block size-3.5" />}
+                        <Link to={`/applications/${row.assetId}`}
+                              className="font-medium hover:text-primary hover:underline">
+                          {row.name}
+                        </Link>
+                      </span>
                       {row.orgPath && (
-                        <div className="text-[11px] text-muted-foreground">{row.orgPath}</div>
+                        <div className="pl-4.5 text-[11px] text-muted-foreground">{row.orgPath}</div>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {row.criticality
+                        ? <Badge tone="high">{row.criticality}</Badge>
+                        : <Badge tone="unknown">not set</Badge>}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {row.exposureDeclared
+                        ?? <span className="italic text-tone-unknown">not declared</span>}
+                    </TableCell>
+                    <TableCell className="tabular text-right text-xs">
+                      {/* Null and zero are different answers. "not declared" is an application whose
+                          API count nobody recorded; a 0 would claim it was counted and came to none,
+                          and would sort to the top of the small-jobs end of the list. */}
+                      {row.apiCount === null
+                        ? <span className="italic text-tone-unknown">—</span>
+                        : row.apiCount}
+                      {row.projectCount > 1 && row.apiCount !== null && (
+                        <span className="pl-1 text-[10px] text-muted-foreground">
+                          /{row.projectCount}
+                        </span>
                       )}
                     </TableCell>
                     <TableCell>
@@ -591,6 +810,11 @@ export function PlanningPage() {
                     <TableCell className="tabular">
                       {row.nextDueAt ?? <span className="italic text-tone-unknown">—</span>}
                     </TableCell>
+                    <TableCell className="tabular text-right">
+                      {row.plannedWindows > 0
+                        ? <span className="font-medium">{row.plannedWindows}</span>
+                        : <span className="text-tone-unknown">none</span>}
+                    </TableCell>
                     <TableCell className="tabular text-right">{row.inFlight || "—"}</TableCell>
                     <TableCell className="tabular text-right">{row.openRequests || "—"}</TableCell>
                     <TableCell className="tabular text-right">
@@ -598,21 +822,157 @@ export function PlanningPage() {
                         ? <span className="font-medium text-sev-high">{row.severeOpen}</span>
                         : "—"}
                     </TableCell>
-                    {data.maySchedule && (
+                    {(data.mayPlan || data.maySchedule) && (
                       <TableCell>
-                        <Button asChild size="sm" variant="ghost">
-                          <Link to={scheduleHref(row)}>
-                            <CalendarPlus className="size-3.5" /> Schedule
-                          </Link>
-                        </Button>
+                        <span className="flex items-center gap-1">
+                          {data.mayPlan && (
+                            <PlanWindowDialog
+                              targets={[{ id: row.assetId, name: row.name, typeCode: "APPLICATION",
+                                          intervalMonths: row.intervalMonths,
+                                          plannedWindows: row.plannedWindows }]}
+                              onSaved={() => setReloads((n) => n + 1)}
+                              trigger={
+                                <Button size="sm" variant="ghost" title="Plan windows for the year">
+                                  <CalendarPlus className="size-3.5" /> Plan
+                                </Button>
+                              } />
+                          )}
+                          {/* Still here, and still the intake form. Raising a request is a different
+                              act from planning one: it needs a scope, and product principle 4 forbids
+                              the platform choosing one on somebody's behalf. */}
+                          {data.maySchedule && (
+                            <Button asChild size="sm" variant="ghost"
+                                    title="Raise an assessment request now">
+                              <Link to={scheduleHref(row)}>Request</Link>
+                            </Button>
+                          )}
+                        </span>
                       </TableCell>
                     )}
                   </TableRow>
+                  {expanded.has(row.assetId) && (
+                    <TableRow className="bg-muted/30 hover:bg-muted/30">
+                      <TableCell colSpan={columnCount} className="py-3">
+                        <div className="flex flex-col gap-3 pl-6">
+                          {/* WHY THE PROJECT BREAKDOWN IS HERE AND NOT A SEPARATE PAGE. The facts an
+                              engagement is sized from — the API count, how it is reached — are
+                              declared on the PROJECT, because that is the granularity an inventory
+                              records them at. At application level the API count is a sum and the
+                              access path is a set of them; neither is what a tester is scoped to. */}
+                          <div>
+                            <div className="text-[11px] font-medium uppercase tracking-wide
+                                            text-muted-foreground">
+                              {projects.length} project{projects.length === 1 ? "" : "s"} under
+                              {" "}{row.name}
+                            </div>
+                            <table className="mt-1.5 w-full max-w-4xl text-xs">
+                              <thead className="text-left text-[10px] uppercase tracking-wide
+                                                text-muted-foreground">
+                                <tr>
+                                  <th className="py-1 pr-4">Project</th>
+                                  <th className="py-1 pr-4">How it is reached</th>
+                                  <th className="py-1 pr-4 text-right">APIs</th>
+                                  <th className="py-1 pr-4 text-right">Planned</th>
+                                  <th className="py-1" />
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {projects.map((pr) => (
+                                  <tr key={pr.projectId} className="border-t border-border/50">
+                                    <td className="py-1 pr-4">
+                                      <Link to={`/projects/${pr.projectId}`}
+                                            className="hover:text-primary hover:underline">
+                                        {pr.name}
+                                      </Link>
+                                    </td>
+                                    <td className="py-1 pr-4">
+                                      {/* The tenant's own value, never ranked. Whether PUBLIC is more
+                                          exposed than ZTNA is a judgement about a vocabulary this
+                                          code did not define (ADR-027). */}
+                                      {pr.accessPath
+                                        ?? <span className="italic text-tone-unknown">not declared</span>}
+                                    </td>
+                                    <td className="tabular py-1 pr-4 text-right">
+                                      {pr.apiCount === null
+                                        ? <span className="italic text-tone-unknown">—</span>
+                                        : pr.apiCount}
+                                    </td>
+                                    <td className="tabular py-1 pr-4 text-right">
+                                      {pr.plannedWindows || <span className="text-tone-unknown">none</span>}
+                                    </td>
+                                    <td className="py-1">
+                                      {data.mayPlan && (
+                                        <PlanWindowDialog
+                                          targets={[{ id: pr.projectId, name: pr.name,
+                                                      typeCode: "PROJECT",
+                                                      intervalMonths: row.intervalMonths,
+                                                      plannedWindows: pr.plannedWindows }]}
+                                          onSaved={() => setReloads((n) => n + 1)}
+                                          trigger={
+                                            <Button size="sm" variant="ghost"
+                                                    className="h-6 px-1.5"
+                                                    title={`Plan windows for ${pr.name}`}>
+                                              <CalendarPlus className="size-3" /> Plan
+                                            </Button>
+                                          } />
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+
+                          {/* The plan itself, so it can be read and undone where it was made. */}
+                          <div>
+                            <div className="text-[11px] font-medium uppercase tracking-wide
+                                            text-muted-foreground">
+                              Planned windows
+                            </div>
+                            {windows.length === 0 ? (
+                              <p className="mt-1 text-[11px] text-muted-foreground">
+                                Nothing planned for this application or its projects. That is not the
+                                same as nothing being owed — the status column says what is owed.
+                              </p>
+                            ) : (
+                              <ul className="mt-1 flex flex-col gap-1">
+                                {windows.map((w) => (
+                                  <li key={w.id} className="flex items-center gap-2 text-xs">
+                                    <span className="tabular">{w.startsOn} → {w.endsOn}</span>
+                                    {w.targetTypeCode === "PROJECT" && (
+                                      <Badge tone="neutral">{w.targetName}</Badge>
+                                    )}
+                                    {w.state === "CONVERTED" && w.requestCode && (
+                                      <Link to={`/requests/${w.requestId}`}
+                                            className="text-primary hover:underline">
+                                        {w.requestCode}
+                                      </Link>
+                                    )}
+                                    {w.note && (
+                                      <span className="text-muted-foreground">{w.note}</span>
+                                    )}
+                                    {data.mayPlan && w.state === "PLANNED" && (
+                                      <Button size="sm" variant="ghost" className="h-5 px-1"
+                                              aria-label={`Cancel the window starting ${w.startsOn}`}
+                                              onClick={() => cancelWindow(w.id)}>
+                                        <Trash2 className="size-3" />
+                                      </Button>
+                                    )}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  </Fragment>
                 );
               })}
               {paging.rows.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={data.maySchedule ? 9 : 8}
+                  <TableCell colSpan={columnCount}
                              className="text-center text-sm text-muted-foreground">
                     No application matches this filter.
                   </TableCell>

@@ -275,6 +275,10 @@ public final class AspmApplication {
         // registration order, so /api/ui/applications/{id} would otherwise swallow "editor" as an
         // identifier, fail to parse it as a UUID, and answer 404 — which is exactly what it did, and
         // the create form rendered the word "not found" with nothing to say why.
+        // Registered before /api/ui/applications/{id} so the template cannot swallow "export",
+        // the same reason "editor" is registered before it.
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/applications/export"),
+                webApi::applicationsExport));
         routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/applications/editor"),
                 editorApi::applicationEditor));
         routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/applications/{id}"),
@@ -296,6 +300,13 @@ public final class AspmApplication {
                 webApi::setAlertActive));
         routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/assessment-plan"),
                 webApi::assessmentPlan));
+        // The plan itself. Registered after the read above and before the {id} template so neither
+        // can swallow "windows".
+        routes.add(new Dispatcher.Route("POST",
+                new PathTemplate("/api/ui/assessment-plan/windows"), webApi::planWindowsCreate));
+        routes.add(new Dispatcher.Route("PATCH",
+                new PathTemplate("/api/ui/assessment-plan/windows/{id}"),
+                webApi::planWindowUpdate));
         routes.add(new Dispatcher.Route("POST",
                 new PathTemplate("/api/ui/dependencies/artifact/{id}/sbom"),
                 webApi::uploadArtifactSbom));

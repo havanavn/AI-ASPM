@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  Building2, ChevronDown, ChevronRight, Loader2, Minus, Pencil, Plus, TrendingDown, TrendingUp, X,
+  Building2, ChevronDown, ChevronRight, Download, Loader2, Minus, Pencil, Plus, TrendingDown,
+  TrendingUp, X,
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -136,14 +137,29 @@ export function OrganizationPage() {
       )}
 
       <Card className="overflow-hidden">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2"><Building2 className="size-4" /> Nodes</CardTitle>
-          <CardDescription>
-            Node types and depth are tenant configuration — nothing here is named in code (ADR-027).
-            Open a node to see the applications beneath it. Every figure covers that node's whole
-            subtree, so a finding counts against each level accountable for it and the columns are not
-            meant to add up.
-          </CardDescription>
+        <CardHeader className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <CardTitle className="flex items-center gap-2"><Building2 className="size-4" /> Nodes</CardTitle>
+            <CardDescription>
+              Node types and depth are tenant configuration — nothing here is named in code (ADR-027).
+              Open a node to see the applications beneath it. Every figure covers that node's whole
+              subtree, so a finding counts against each level accountable for it and the columns are not
+              meant to add up.
+            </CardDescription>
+          </div>
+          {/* The whole inventory, not one node's.
+              The per-node button inside an expanded row exports that subtree, which is the wrong
+              affordance for "give me everything" — it is reachable only after choosing a node, and
+              choosing a node is exactly what this reader does not want to do. So the unnarrowed
+              export lives at the top, with no `node` parameter: the file is bounded by the caller's
+              own scope and by nothing else, which for a reader who can see the whole tree is the
+              whole tree. A scoped reader gets their own subtree and the file says so on its Filter
+              sheet, because a short file must not be readable as a small estate. */}
+          <Button asChild variant="secondary" size="sm" className="shrink-0">
+            <a href="/api/ui/applications/export">
+              <Download className="size-3.5" /> Export the whole inventory
+            </a>
+          </Button>
         </CardHeader>
         {data.nodes.length === 0 ? (
           <CardContent className="text-sm text-muted-foreground">No node is configured yet.</CardContent>
@@ -289,8 +305,23 @@ function NodeRow({ node, open, onToggle, onEdit }: {
   );
 }
 
-/** How many applications the inline list draws before deferring to the inventory. */
-const INLINE_LIMIT = 25;
+/**
+ * How many applications the inline list draws per page.
+ *
+ * This used to be a hard truncation: the list drew the first twenty-five and pointed the reader at
+ * the inventory for the rest. Smaller than the shared default of twenty because this table is nested
+ * inside an expanded tree row — a hundred rows here pushes every node below it off the screen — and
+ * the reader can raise it from the footer if they want more.
+ */
+const INLINE_PAGE = 15;
+
+/**
+ * One shared empty list for the not-yet-loaded case.
+ *
+ * A fresh `[]` on every render is a new identity, which invalidates the slice memo in `usePaging` on
+ * every render of a tree that has other reasons to re-render often.
+ */
+const EMPTY_APPS: AppRow[] = [];
 
 /**
  * The applications beneath one node, fetched when the node is opened.
@@ -302,6 +333,9 @@ const INLINE_LIMIT = 25;
 function NodeApplications({ node }: { node: Node }) {
   const [rows, setRows] = useState<AppRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Called before the loading and empty returns below, because a hook that runs conditionally
+  // desynchronises React's hook order on the render where the fetch lands.
+  const paging = usePaging(rows ?? EMPTY_APPS, INLINE_PAGE);
 
   useEffect(() => {
     let live = true;
@@ -333,7 +367,6 @@ function NodeApplications({ node }: { node: Node }) {
     );
   }
 
-  const shown = rows.slice(0, INLINE_LIMIT);
   return (
     <div className="flex flex-col gap-2 px-5 py-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -347,6 +380,18 @@ function NodeApplications({ node }: { node: Node }) {
           {/* The organization tree and the asset graph are separate structures joined by ownership
               (ADR-001); this is where a reader crosses from one into the other. */}
           <GraphDrawer compact rootId={node.id} label={node.name} />
+          {/* Scoped to this node and everything beneath it — the same subtree the list and the count
+              above already agree on, so the file cannot disagree with the screen it came from. A
+              link rather than a fetch, for the reason the inventory's own export gives; recorded in
+              the audit trail with this node as its scope (PRD-API-046). */}
+          <Button asChild variant="ghost" size="sm"
+                  className="h-6 px-1.5 text-muted-foreground hover:text-foreground"
+                  title={`Export the ${rows.length} application${rows.length === 1 ? "" : "s"} under ${node.name} to Excel`}>
+            <a href={`/api/ui/applications/export?node=${encodeURIComponent(node.id)}`}
+               aria-label={`Export the applications under ${node.name} to Excel`}>
+              <Download className="size-3.5" />
+            </a>
+          </Button>
           <Link to={`/applications?node=${node.id}`} className="text-xs text-primary hover:underline">
             Open in the inventory
           </Link>
@@ -366,7 +411,7 @@ function NodeApplications({ node }: { node: Node }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {shown.map((a) => (
+            {paging.rows.map((a) => (
               <TableRow key={a.id}>
                 <TableCell>
                   <Link to={`/applications/${a.id}`} className="text-xs font-medium text-primary hover:underline">
@@ -398,15 +443,17 @@ function NodeApplications({ node }: { node: Node }) {
             ))}
           </TableBody>
         </Table>
+        {/* Inside the bordered table rather than under it, so a nested table reads as one object.
+            The footer states the extent even on a single page: a list that stops without saying so
+            reads as "that is all of them", which is the one thing it must not mean here. */}
+        <Pager paging={paging} unit="applications" />
       </div>
-      {/* Said out loud rather than truncated quietly. A list that stops at twenty-five without saying
-          so reads as "that is all of them", which is the one thing it must not mean here. */}
-      {rows.length > shown.length && (
+      {paging.pages > 1 && (
         <p className="text-[11px] text-muted-foreground">
-          Showing the first {shown.length} of {rows.length}.{" "}
           <Link to={`/applications?node=${node.id}`} className="text-primary hover:underline">
-            See all {rows.length} in the inventory
-          </Link>, where they can be searched, sorted and filtered.
+            Open these {rows.length} in the inventory
+          </Link>{" "}
+          to search, sort and filter them, and to see the declared fields this table has no room for.
         </p>
       )}
     </div>

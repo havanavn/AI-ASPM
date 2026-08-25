@@ -192,6 +192,16 @@ public final class PlatformOperations {
         operations.add(new OperationRegistry.Operation("GET", "/api/ui/assessment-plan",
                 AnnotationClass.A_SCOPED_READ, Optional.of(aspm.app.ui.ApplicationPages.READ),
                 Set.of(), Set.of()));
+        // Laying out and moving planned windows. Class B: a scoped write against one target at a
+        // time, re-validating the caller's reach over every target in the batch. Not E — a window is
+        // one record's intention, not configuration other decisions are computed from; and not F,
+        // because planning is a person's act at a screen, never a pipeline's.
+        operations.add(new OperationRegistry.Operation("POST", "/api/ui/assessment-plan/windows",
+                AnnotationClass.B_SCOPED_WRITE,
+                Optional.of(aspm.app.ui.UiApi.PLAN_WINDOW_PERMISSION), Set.of(), Set.of()));
+        operations.add(new OperationRegistry.Operation("PATCH",
+                "/api/ui/assessment-plan/windows/{id}", AnnotationClass.B_SCOPED_WRITE,
+                Optional.of(aspm.app.ui.UiApi.PLAN_WINDOW_PERMISSION), Set.of(), Set.of()));
         // Class B: a scoped write on one asset. Not E — it changes one record's lifecycle, not the
         // configuration every other decision is computed from. The handler refuses an APPLICATION so
         // this cannot become a second, weaker path to retiring one (CON-PLT-009).
@@ -394,6 +404,11 @@ public final class PlatformOperations {
         // The estate graph. A read over two structures at once, so it is authorized as a scoped
         // read on the asset side — the organization nodes it returns are already filtered by the
         // caller's own closure, which is what SEC-AUZ-016 asks of an aggregate.
+        // The application inventory as a spreadsheet. A read, and the same scoped read the list is:
+        // the export runs the list handler, so it cannot return a row the list would not.
+        operations.add(new OperationRegistry.Operation("GET", "/api/ui/applications/export",
+                AnnotationClass.A_SCOPED_READ, Optional.of(aspm.app.ui.ApplicationPages.READ),
+                Set.of(), Set.of()));
         operations.add(new OperationRegistry.Operation("GET", "/api/ui/graph/{id}",
                 AnnotationClass.A_SCOPED_READ, Optional.of(aspm.app.ui.ApplicationPages.READ),
                 Set.of(), Set.of()));
