@@ -1638,11 +1638,152 @@ Neutral: the edge attribute remains unconstrained, so this catalogue governs wha
 
 ---
 
+## ADR-062 — A unique-identity violation is a conflict the caller can act on, not an internal error
+
+**Status.** Accepted · **Date.** 2026-08-25 · **Deciders.** Chief Software Architect, Principal Security Architect
+
+**Context.** Asset identity is enforced at the engine by a unique index over `(tenant_id, type_id, identity_key)`. The dispatcher translates one SQL state into a domain response — `23503`, foreign key violation — and translates no other. A unique violation therefore falls through to the generic handler.
+
+Measured on a running deployment, twice, with a service credential:
+
+```
+POST /api/v1/assets {"display_name": "DUPLICATE PROBE app", …}  → 201
+POST /api/v1/assets {"display_name": "DUPLICATE PROBE app", …}  → 500 INTERNAL_ERROR, correlation=86d933f8…
+POST /api/v1/assets {"display_name": "duplicate probe APP", …}  → 500   (identity folds case)
+```
+
+Three things follow, and the third is the expensive one. A client cannot tell "this already exists" from "the platform is broken". A correlation identifier sends somebody to a server log for a condition that is entirely the caller's to fix. And a `500` is the one status a well-written client is *supposed* to retry — so a bulk load meeting an existing record retries a request that can never succeed, at whatever backoff it was given, for as long as it is willing to.
+
+The obvious repair — answer `409` and name the record already holding the identity — is wrong as stated, and `SEC-AUZ-020` is why: responses must not differentiate non-existence from non-authorization, in status code, error code, message **or timing**. An identity collision with a record outside the caller's scope is exactly that differentiation. A caller who cannot see an asset would learn it exists by trying to create one with its name, and would learn its identifier from the refusal.
+
+**Options considered.**
+
+- **A. Leave it.** The constraint holds, no data is corrupted, and the caller reads the documentation.
+- **B. Map `23505` to `409 CONFLICT`, always naming the conflicting record.**
+- **C. Map `23505` to `409 CONFLICT`, naming the conflicting record only where the caller can already reach it, and returning a bare conflict otherwise.**
+- **D. Check for the existing record before inserting, and answer from that check.**
+
+**Decision.** Option C. `23505` maps to `409` with a stable code; the response carries the conflicting record's identifier only when a scoped re-read returns it to this caller, and otherwise says that the identity is taken without saying by what.
+
+**Why not the others.** Option A leaves a status code that instructs clients to retry an impossible request, and leaves the integrity of the inventory being defended by a message nobody can act on. Option B is a disclosure: it turns the create endpoint into an oracle for the existence and identifier of records outside the caller's scope, which is the first of the five highest-risk surfaces this platform names about itself. Option D is the same defect in a different place — a read-then-insert races, and the window between the check and the insert is exactly where a concurrent create lands, so the constraint would still fire and still be unmapped. The check is a usability improvement over the refusal, never a replacement for it.
+
+**Consequences.**
+
+Positive: a bulk load can distinguish "already present" from "server fault" and choose between skipping, updating and stopping, which is what a first import of a real estate spends most of its time doing. The retry storm goes away. A conflict stops consuming a correlation identifier and an entry in an error log that on-call reads.
+
+Negative, and it is the cost this record accepts: the response is now **deliberately less informative for some callers than for others**, and that asymmetry has to be implemented in the error path rather than in the happy path, which is where error handling is least often tested. A conflict that names nothing is harder to debug, and the person debugging it will be tempted to widen it. `SEC-AUZ-020` is the reason not to, and that is why it is cited here rather than left implied.
+
+Neutral: other unique constraints in the schema gain the same treatment by construction. This is a mapping of a SQL state, not a special case for one table.
+
+**What this decision does NOT do.** It does not make creation idempotent. A repeated create is still a refusal rather than a no-op returning the first outcome, and callers that want to repeat a create safely need ADR-063. It also does not add a lookup-by-name to the versioned API: `display_name` is deliberately not filterable, so finding the existing record remains the caller's problem, and this decision only stops that problem being reported as a server fault.
+
+**Compliance.** Verified through `PRD-AST-006` (identity independent of display name), `SEC-AUZ-020` (non-existence and non-authorization are indistinguishable), `PRD-UIX-025` (no internal detail in an error) and `PRD-WRK-043`, whose "explicit conflict response" is the shape being applied to a different conflict.
+
+**Revisit trigger.** Revisit if the platform gains an upsert on any resource, because an upsert makes the identity collision an ordinary outcome rather than a refusal and this mapping would then fire on a path where it means something else.
+
+---
+
+## ADR-063 — Idempotency keys are required and unenforced; make them real rather than ceremonial
+
+**Status.** Accepted · **Date.** 2026-08-25 · **Deciders.** Chief Software Architect, Principal Security Architect
+
+**Context.** `PRD-API-005` is a MUST_HAVE and reads: *state-changing operations MUST support idempotency keys, and a repeated key MUST return the original outcome rather than repeating the effect.* The dispatcher requires the header on every class B and class E operation and refuses the request without one.
+
+It then validates the key's shape, namespaces it by tenant — which is a real control, and the reason one tenant's replay cannot collide with another's under `SEC-TEN-009` — and does nothing else with it. There is no stored-outcome table in the schema. Measured:
+
+```
+POST /api/v1/assets  {…}  Idempotency-Key: K   → 201  id=01a03722-e184…
+POST /api/v1/assets  {…}  Idempotency-Key: K   → 500        (executed again, hit the identity constraint)
+```
+
+So the second half of the requirement is unimplemented, and the header is a gate rather than a guarantee. One endpoint does satisfy it and implements the check itself: `POST /api/v1/finding-imports` looks up the prior import session by key before parsing or writing anything and returns the first submission's report, because a second ingestion re-detects every finding and re-detection of a closed finding reopens it — a CI timeout would otherwise manufacture "this keeps coming back" out of nothing.
+
+That single implementation is what makes the gap hard to see. The behaviour is correct on the door most likely to be retried, and absent everywhere else, so a reviewer who tests ingestion concludes the platform has idempotency.
+
+**Options considered.**
+
+- **A. Leave it, and document that the header is required and not honoured.**
+- **B. Stop requiring the header where nothing acts on it,** and mark `PRD-API-005` as partially met.
+- **C. A stored-outcome table consulted by the dispatcher, for every operation that requires a key.**
+- **D. Per-endpoint implementation, as ingestion already does.**
+
+**Decision.** Option C. A tenant-scoped record of `(tenant, key, method, path, request digest)` to the response that was produced, written in the same transaction as the operation and consulted before it. A repeat of the same key with the same request returns the stored response. A repeat with a **different** request digest is a client error and is refused, not served from the store.
+
+**Why not the others.** Option A keeps a control that looks like a control, which is worse than not having one: a client author reads the required header and reasonably concludes retries are safe. Option B is defensible and was close — a gate that stops a form double-submit has some value even without replay — but it gives up the requirement rather than meeting it, and `PRD-API-005` was written for the case this platform actually has: pipelines writing to it on a timeout. Option D produces one implementation per endpoint, each written by somebody who has to remember the rule, which is how ingestion came to be the only one.
+
+Binding the request digest into the key is what stops the store becoming a new defect. Without it, a client that reuses a key across two different requests receives the first request's response for the second — a wrong answer delivered confidently, which is harder to detect than an error.
+
+**Consequences.**
+
+Positive: `PRD-API-005` becomes true of the platform rather than of one endpoint. A pipeline can retry a scoped write without either duplicating the effect or having to reason about which endpoint it is talking to. The form double-submit case the dispatcher comment describes is genuinely closed rather than merely refused.
+
+Negative: a write to a shared table on every state-changing operation, on the transaction path, at whatever the platform's write rate becomes — and the store grows without bound unless it is aged out, so a retention window becomes an operational parameter somebody must set and monitor. A stored response can also be **stale**: replaying a 201 for a record that has since been retired returns an outcome that was true and is not. That is the correct answer to "what happened when I sent this" and the wrong answer to "what is true now", and the two are easy to confuse.
+
+Neutral: ingestion's own check stays. It is inside the ingestion transaction and answers a question about an import session rather than about an HTTP response, and collapsing the two would make the ingestion path depend on the dispatcher's storage for a property it currently owns.
+
+**What this decision does NOT do.** It does not make every operation safe to repeat — an operation that is not idempotent in the domain stays that way, and the store only guarantees that a repeated *request* does not become a repeated *effect*. It does not apply to class A reads, where a key protects nothing. And it does not change the nonce-and-timestamp replay protection on signed requests, which answers a different question: that mechanism stops an attacker replaying a captured call, this one stops a legitimate client repeating its own.
+
+**Compliance.** Verified through `PRD-API-005`, `SEC-TEN-009` (the namespace must be tenant-partitioned structurally, which the existing key construction already satisfies and the new store must preserve), and `PRD-ING-005`, which is the ingestion-specific form the existing implementation meets.
+
+**Revisit trigger.** Revisit when the write rate makes the store's own contention measurable, or when a retention window shorter than the longest client retry interval is proposed — a store that forgets before a client stops retrying is a store that answers "no record of this" to the case it exists for.
+
+---
+
+## ADR-064 — One identity rule per asset type, applied by every writer that creates one
+
+**Status.** Accepted · **Date.** 2026-08-25 · **Deciders.** Chief Software Architect, Principal Security Architect
+
+**Context.** `PRD-AST-006` is a MUST_HAVE: *each Asset MUST have a stable identity independent of its display name, and the platform MUST define per-type identity resolution rules.* `asset_type.identity_rule` exists to hold those rules, and ADR-009 makes the type registry the place they live.
+
+Two writers create `REPOSITORY` assets and they do not agree. The seeds and the composition pipeline write an identity key of the form `repo:<namespace>/<name>`. The inventory form derives one by folding the **display name** — which is what `PRD-AST-006` forbids in its first clause — so the same repository resolves to a different identity depending on which door it arrives through.
+
+The estate carried the fingerprint of this before any of it was investigated:
+
+```
+repo:Card Issuing/Authorization/aspm-upload-check
+repo:Card Issuing/Authorization/repo:Card Issuing/Authorization/aspm-upload-check
+repo:Card Issuing/Authorization/repo:Card Issuing/Authorization/repo:…/aspm-upload-check
+```
+
+Three rows, one repository, the prefix accumulating once per save. It is produced by an ordinary round trip: the editor returns the repository's display name, the save resolves that name by the other rule, no existing asset matches, and a new one is created. Reproduced twice more during verification on 2026-08-24, on two different projects, each time moving the project's `BUILDS` edge to the new duplicate and leaving the original with a closed edge.
+
+The consequence is not cosmetic and it is not confined to the inventory. Two assets for one repository are two rows a component advisory can reach, two coverage states, and two answers to "which systems contain this vulnerable component" — the question ADR-001 restructured the whole model to make answerable.
+
+**Options considered.**
+
+- **A. Make the inventory form use the `repo:` form.** One writer changes, the rule stays implicit.
+- **B. Normalise existing duplicates and add a uniqueness check in the application layer.**
+- **C. One derivation, in one place, driven by `asset_type.identity_rule`, that every writer calls — and editors that round-trip an identifier rather than a display name.**
+- **D. Accept both forms and reconcile duplicates after the fact.**
+
+**Decision.** Option C. Identity derivation becomes a single function over the type's declared `identity_rule`; every path that creates or resolves an asset by name calls it; and the record editors send the identifier they were given rather than re-resolving a name the user never edited.
+
+**Why not the others.** Option A fixes the writers that exist today and leaves the next one to be written by somebody who does not know this note exists — which is precisely how the second writer appeared. Option B puts the rule in the application layer, where DOC-26 §13.2 places it in the weaker class of control: it holds until the next endpoint forgets it. Option D is the failure it claims to fix — reconciliation of duplicate assets is a thing this platform does for findings, deliberately, because findings arrive from sources it does not control; assets it creates itself should not need it.
+
+The second half of the decision is the load-bearing half. Even with one derivation rule, an editor that round-trips a display name will create a new asset whenever the name and the stored identity disagree — which is exactly the case a rename produces. Sending the identifier removes the re-resolution entirely.
+
+**Consequences.**
+
+Positive: one repository is one asset however it was recorded, so reachability, coverage and advisory impact stop being split across duplicates. A rename stops being a create. The `identity_rule` column stops being documentation and becomes the thing the code reads.
+
+Negative: the existing duplicates do not merge themselves. Merging them means moving edges, findings and coverage from one asset to another and closing the loser, and there is no DELETE grant on `asset` — so the migration is a data-repair exercise with an audit trail of its own, on rows that real work may already reference. Until it runs, the estate holds assets that this decision says should not exist. Naming that here is the point: the decision is cheap and the cleanup is not.
+
+Neutral: types whose identity rule is genuinely the display name — where the natural key and the label are the same string — behave exactly as before. The change is that the rule is consulted rather than assumed.
+
+**What this decision does NOT do.** It does not define the identity rule for any particular type; those stay tenant-visible data in the type registry. It does not touch finding identity, which is product-fixed under `CFG-PLT-004` and deliberately not tenant-configurable. And it does not repair the recorded duplicates — that is a separate migration, and the rule it needs — which of two rows survives when both carry findings, coverage and edges — is raised as `OQ-029` rather than guessed at here.
+
+**Compliance.** Verified through `PRD-AST-006` (stable identity independent of display name, per-type rules) and `PRD-AST-001` (one Asset aggregate distinguished by type, with the registry declaring what each type means).
+
+**Revisit trigger.** Revisit when a second asset type acquires a namespaced identity — an artifact coordinate, a container digest — because a rule expressive enough for two forms is a rule that needs a grammar rather than a convention, and that is a larger decision than this one.
+
+---
+
 ## Change History
 
 | Version | Date | Author | Change | Reviewer |
 |---|---|---|---|---|
-| 1.3.0 | 2026-08-21 | Chief Software Architect, Principal Security Architect | Added ADR-061, making the environment an endpoint is published in a tenant catalogue rather than two hardcoded pairs of form fields. The record states the defect it closes rather than only the decision it takes: because the endpoint columns were derived from recorded data alone, an environment with no write path could never become a column, so an application's UAT host was unrecordable and therefore absent from every list, filter and count. Two further defects in the same surface are recorded in it — endpoint columns sent as unfilterable while their filter keys were validated against the wrong catalogue and therefore silently discarded, and a `findFirst()` in both editors that hid the second host in an environment and closed its edge on save. 53 expanded records. | Pending |
+| 1.4.0 | 2026-08-25 | Chief Software Architect, Principal Security Architect | Added ADR-062, ADR-063 and ADR-064, each recording a defect reproduced against a running deployment rather than a decision taken in the abstract. ADR-062: a unique-identity violation reaches the client as `500 INTERNAL_ERROR`, because the dispatcher maps `23503` and no other SQL state — so a duplicate create is indistinguishable from a server fault and is the one status a client is supposed to retry. The repair is constrained by `SEC-AUZ-020`: naming the conflicting record would turn the create endpoint into an existence oracle for records outside the caller's scope. ADR-063: `PRD-API-005` requires a repeated idempotency key to return the original outcome; the dispatcher validates the key's shape, namespaces it, and executes the request anyway, so the requirement is met by exactly one endpoint that implements the check itself. ADR-064: two writers derive `REPOSITORY` identity by two different rules, one of them from the display name that `PRD-AST-006` forbids, which has been producing duplicate assets — the estate carries a `repo:` prefix stacked three deep on one repository, and two further duplicates were reproduced during verification. **59 expanded records, and the figure in the row below is corrected.** The running count had drifted: ADR-057, ADR-058 and ADR-059 were added with complete records and no change-history row, so 1.2.0's "52" understated by three, and 1.3.0 — written by the same hand as this row — copied the previous row's arithmetic instead of counting the file, giving 53 where it held 56. 1.3.0 is corrected in place with the superseded figure left visible; 1.2.0 and earlier are left exactly as written, because a change history records what was said at the time and rewriting older entries would destroy the evidence that the drift happened. Counted, not derived: 59 headings, with 008, 014, 015, 018 and 025 cross-referenced rather than expanded. | Pending |
+| 1.3.0 | 2026-08-21 | Chief Software Architect, Principal Security Architect | Added ADR-061, making the environment an endpoint is published in a tenant catalogue rather than two hardcoded pairs of form fields. The record states the defect it closes rather than only the decision it takes: because the endpoint columns were derived from recorded data alone, an environment with no write path could never become a column, so an application's UAT host was unrecordable and therefore absent from every list, filter and count. Two further defects in the same surface are recorded in it — endpoint columns sent as unfilterable while their filter keys were validated against the wrong catalogue and therefore silently discarded, and a `findFirst()` in both editors that hid the second host in an environment and closed its edge on save. 56 expanded records (corrected from 53 — see 1.4.0). | Pending |
 | 1.2.0 | 2026-08-14 | Chief Software Architect, Principal Security Architect | Added ADR-060, a second automated ingestion path for SARIF scan reports, and marked ADR-023 `Superseded in part` with the retained record annotated to say which part. The exclusivity clause of ADR-023 was the only thing superseded; its single-point-of-failure consequence now applies to two endpoints rather than one, which the new record states rather than leaving to be inferred. ADR-060 also records what it does not do: runtime findings stay out, because the RUNTIME identity class declares an input a URL-based result does not carry, and that question is raised as `OQ-028` rather than answered in code. 52 expanded records. | Pending |
 | 1.1.0 | 2026-08-04 | Chief Software Architect, Principal Security Architect | Extended with the eight technology selections DOC-02 §16 deferred and DOC-15 §2 specified, as ADR-049 through ADR-056, satisfying `OPS-DEP-001`. Each carries a Constraint verification field and a Gaps accepted field beyond DOC-00 §13.1, the second satisfying `OPS-DEP-002`. The two disqualifying constraints of ADR-042 were verified mechanism by mechanism: three candidate operational stores and two candidate toolchains were rejected for failing one or both, and three candidates that satisfied both constraints were rejected on secondary grounds recorded in the record rather than omitted. Four required properties are recorded as not provided by any candidate and enforced above the selected component — non-retrievable-after-entry and dual-controlled destruction in ADR-052, and cross-tenant cache key collision in ADR-055, the last identified as the highest-severity accepted risk of the set. The concentration of four of the eight decisions into the operational store is stated as an aggregate cost with a measured extraction trigger per decision. 51 expanded records. | Pending |
 | 1.0.0 | 2026-08-04 | Chief Software Architect | Completed at 43 expanded records. Seeded with 24 covering the decisions taken during requirements analysis and DOC-01 authoring. Each carries options considered, mandatory negative consequences, and a conditional revisit trigger. Four corpus-level decisions are cross-referenced rather than expanded. Extended with nineteen decisions taken during the authoring of DOC-02 through DOC-17, each recording the cost accepted, including three convention corrections found by the corpus tooling rather than by review and one overstated diagnosis corrected in the record. | Pending |

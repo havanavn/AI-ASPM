@@ -153,4 +153,13 @@ Seven errors were found and corrected in the documents rather than fixed silentl
 6. **An unregistered class code** `DEP` used in DOC-15. Found by the validator; forty identifiers renumbered into the registered `OPS` class.
 7. **An inconsistency in DOC-00 itself** — §7.1 requires an extensibility attribute that §7.3's compact form omits. Resolved by the domain-level convention of DOC-01 LC-05 and recorded as a required patch.
 
+8. **A drifting count in DOC-19's change history.** The "expanded records" figure is a running total
+   of ADRs. `ADR-057`, `ADR-058` and `ADR-059` were added with complete records and no change-history
+   row, so the total silently fell three behind; the next two entries carried the error forward, one
+   of them by copying the previous row's arithmetic rather than counting the file. Corrected at 1.4.0
+   by counting — 59 expanded records, with five numbers cross-referenced rather than expanded — and
+   the superseded figure is left visible in the row that carried it. Found by counting the headings
+   while adding three records, not by review.
+
 Items 4, 5, and 6 were found by tooling rather than by reading. That is the argument for the tooling.
+Item 8 was found by not trusting arithmetic over a number that could be counted.

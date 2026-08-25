@@ -144,6 +144,17 @@ These were open questions resolved by ratifying the recommended assumption rathe
 
 ---
 
+### OQ-029 — When two assets are one thing, which survives the merge?
+**Question.** ADR-064 stops duplicate assets being created. It does not repair the ones already recorded — the estate carries three `REPOSITORY` rows for one repository, and two more were produced during verification before the cause was understood. Merging them means one row survives and the other is closed. Which one, when both carry work?
+**Why it matters.** The duplicates are not empty. An asset can hold findings, coverage state, edges to the composition graph, assessment scope, and grants. The obvious rule — keep the oldest — loses whatever was recorded against the newer row, which is usually the one the interface has been writing to most recently. The opposite rule loses the history the older row anchors, including "what was deployed when this finding was open", which `INV-AST-16` and the temporal edge model exist to preserve. Choosing per-table is worse than either: a finding pointing at one row and its coverage at the other is a split record nothing detects.
+**Blocks.** The repair migration ADR-064 defers. Does not block ADR-064 itself, which prevents new duplicates and is independently useful.
+**Owner.** Chief Software Architect · **Required by.** Before real inventory is loaded, because a merge across records a company depends on is a different exercise from a merge across seeded demonstration data
+**Working assumption.** None. Every candidate rule loses something, and which loss is acceptable depends on what the duplicates actually hold in the estate being repaired — which is a measurement nobody has taken. Recording an assumption here would be recording a preference as a finding.
+**Impact if wrong.** High and irreversible in one direction. There is no DELETE grant on `asset`, so a merge closes the loser rather than removing it and the trail survives — but findings, coverage and edges moved to the wrong survivor are moved, and moving them back is a second migration over data a third one has since touched.
+**Status.** `Open`
+
+---
+
 ## Escalation
 
 A question past its required-by date with status `Open` MUST be escalated to the corpus owner and recorded here. A blocking question that is silently late is how documentation projects fail without anyone deciding to fail (DOC-00 §14.3).
@@ -159,6 +170,7 @@ Per DOC-00 §14.3, an open question past its required-by date is escalated and r
 
 | Version | Date | Author | Change | Reviewer |
 |---|---|---|---|---|
+| 1.3.0 | 2026-08-25 | Chief Software Architect | Added `OQ-029`, raised by ADR-064. That decision stops duplicate assets being created and deliberately does not repair the ones already recorded, because the repair needs a rule for which of two rows survives when both carry findings, coverage and graph edges — and every candidate rule loses something. Recorded with no working assumption for the same reason as `OQ-028`: the choice depends on what the duplicates actually hold, which nobody has measured. | Pending |
 | 1.2.0 | 2026-08-14 | Chief Software Architect | Added `OQ-028`, raised by ADR-060 rather than by review: the RUNTIME identity class declares an input that a DAST result against a URL does not carry, and the parser holds such results in quarantine instead of substituting a value. Recorded with NO working assumption, which is a departure from every other entry here and is deliberate — the other assumptions bind figures and products, this one would bind what identity means for a class of finding, and DOC-03 §8.5 is explicit that the first version of an identity rule is the least informed. | Pending |
 | 0.1.0 | 2026-08-04 | Staff Product Manager | Seeded with three ratified assumptions and seven open questions arising from DOC-01. |
 | 1.0.0 | 2026-08-04 | Staff Product Manager | Completed at corpus baseline. Records that all 26 documents were authored without any question blocking authoring, each carried on a documented working assumption marked at its point of use. Reclassifies OQ-015 and OQ-026 from blocking documents to blocking implementation, with their consequence restated: partition counts are irreversible after production data, and three credential paths in the first build block depend on the vault decision. Both escalated per DOC-00 §14.3. States what the assumptions cost — every affected requirement is structurally sound and numerically provisional, and no document requires restructuring on any answer. | Pending |
