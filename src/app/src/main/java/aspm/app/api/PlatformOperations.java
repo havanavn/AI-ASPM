@@ -202,6 +202,15 @@ public final class PlatformOperations {
         operations.add(new OperationRegistry.Operation("PATCH",
                 "/api/ui/assessment-plan/windows/{id}", AnnotationClass.B_SCOPED_WRITE,
                 Optional.of(aspm.app.ui.UiApi.PLAN_WINDOW_PERMISSION), Set.of(), Set.of()));
+        // Asserting that a review happened outside the platform, and taking the assertion back. Class
+        // B: scoped to one application, re-validated at the statement. Its own permission rather than
+        // a reuse, because it moves a coverage figure on one person's word (ADR-066).
+        operations.add(new OperationRegistry.Operation("POST",
+                "/api/ui/assessment-plan/attestations", AnnotationClass.B_SCOPED_WRITE,
+                Optional.of(aspm.app.resource.ReviewAttestations.ATTEST), Set.of(), Set.of()));
+        operations.add(new OperationRegistry.Operation("POST",
+                "/api/ui/assessment-plan/attestations/{id}/withdraw", AnnotationClass.B_SCOPED_WRITE,
+                Optional.of(aspm.app.resource.ReviewAttestations.ATTEST), Set.of(), Set.of()));
         // Class B: a scoped write on one asset. Not E — it changes one record's lifecycle, not the
         // configuration every other decision is computed from. The handler refuses an APPLICATION so
         // this cannot become a second, weaker path to retiring one (CON-PLT-009).

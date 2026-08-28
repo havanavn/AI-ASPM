@@ -25,6 +25,24 @@ export interface PlanTarget {
   plannedWindows?: number;
 }
 
+/**
+ * A window already in the plan.
+ *
+ * <p>Declared here rather than imported from the page, so the dialog does not import from something
+ * that imports it. TypeScript is structural, so the page's own row type satisfies this by shape.
+ */
+export interface ExistingWindow {
+  id: string;
+  startsOn: string;
+  endsOn: string;
+  note: string | null;
+  state: string;
+  targetName: string;
+  targetTypeCode: string;
+  requestId: string | null;
+  requestCode: string | null;
+}
+
 /** One proposed window, before it is saved. */
 interface Proposal {
   key: string;
@@ -124,9 +142,22 @@ function propose(year: number, perYear: number, days: number): Proposal[] {
  * Nine applications at four a year is thirty-six windows, and a planner who did not expect that
  * number should see it on the button rather than in the plan afterwards.
  */
-export function PlanWindowDialog({ targets, onSaved, trigger, disabled }: {
+export function PlanWindowDialog({ targets, existing = [], onSaved, onCancelWindow, trigger,
+                                    disabled }: {
   targets: PlanTarget[];
+  /**
+   * What is already in the plan for these targets.
+   *
+   * <p><b>This dialog used to be create-only, and that was the defect.</b> Somebody who had just
+   * saved four windows pressed the same button to check them and was shown a fresh proposal for the
+   * current year — so the plan they had made was nowhere on the screen that made it. Reported from
+   * use: "đã set xong rồi mà click xem lại không thấy thông tin đã lưu về ngày tháng". A dialog that
+   * writes a record has to show the record.
+   */
+  existing?: ExistingWindow[];
   onSaved: () => void;
+  /** Dropping one window from the plan, from the place the plan is read. */
+  onCancelWindow?: (id: string) => Promise<void>;
   trigger: React.ReactNode;
   disabled?: boolean;
 }) {
@@ -189,9 +220,10 @@ export function PlanWindowDialog({ targets, onSaved, trigger, disabled }: {
     }
   }
 
+  // Offered years. Bounded to what the plan horizon carries, so the dialog cannot write a window the
+  // page would then decline to list — which is the shape of the defect this release fixes.
   const years = useMemo(
-    () => [thisYear, thisYear + 1, thisYear + 2], [thisYear]);
-  const alreadyPlanned = targets.reduce((sum, t) => sum + (t.plannedWindows ?? 0), 0);
+    () => [thisYear - 1, thisYear, thisYear + 1, thisYear + 2], [thisYear]);
 
   return (
     <Dialog.Root open={open} onOpenChange={(next) => {
@@ -237,12 +269,59 @@ export function PlanWindowDialog({ targets, onSaved, trigger, disabled }: {
                 </span>
               )}
             </div>
-            {alreadyPlanned > 0 && (
-              <p className="mt-1.5 text-[11px] text-muted-foreground">
-                {alreadyPlanned} window{alreadyPlanned === 1 ? "" : "s"} already planned for
-                {targets.length === 1 ? " this target" : " these targets"} — these are added to the
-                plan, not replacing it.
+          </div>
+
+          {/* THE PLAN AS IT STANDS, before anything is added to it. This is the half that was
+              missing: the button that writes the plan showed only a blank proposal, so there was no
+              screen anywhere that answered "what did I just save". */}
+          <div className="rounded-md border">
+            <div className="flex items-baseline justify-between gap-3 border-b bg-muted/40 px-3 py-2">
+              <span className="text-[11px] font-medium uppercase tracking-wide
+                               text-muted-foreground">
+                Already in the plan
+              </span>
+              <span className="text-[11px] text-muted-foreground">
+                {existing.length === 0 ? "nothing yet"
+                  : `${existing.length} window${existing.length === 1 ? "" : "s"} — anything below is `
+                    + "added to these, not replacing them"}
+              </span>
+            </div>
+            {existing.length === 0 ? (
+              <p className="px-3 py-2.5 text-[11px] text-muted-foreground">
+                {/* Product principle 1 in one sentence: nothing planned is not nothing owed, and the
+                    two must not read the same. */}
+                No window is planned for {targets.length === 1 ? "this target" : "these targets"}.
+                That is not the same as nothing being owed — the Status column says what is owed.
               </p>
+            ) : (
+              <ul className="divide-y">
+                {existing.map((w) => (
+                  <li key={w.id} className="flex items-center gap-2 px-3 py-1.5 text-xs">
+                    <span className="tabular font-medium">{w.startsOn} → {w.endsOn}</span>
+                    {targets.length > 1 || w.targetTypeCode === "PROJECT" ? (
+                      <Badge tone={w.targetTypeCode === "PROJECT" ? "neutral" : "ok"}>
+                        {w.targetName}
+                      </Badge>
+                    ) : null}
+                    {w.state === "CONVERTED" && (
+                      <Badge tone="ok">
+                        request raised{w.requestCode ? ` — ${w.requestCode}` : ""}
+                      </Badge>
+                    )}
+                    {w.state === "CANCELLED" && <Badge tone="unknown">cancelled</Badge>}
+                    {w.note && <span className="truncate text-muted-foreground">{w.note}</span>}
+                    <span className="flex-1" />
+                    {onCancelWindow && w.state === "PLANNED" && (
+                      <Button variant="ghost" size="sm" className="h-5 px-1"
+                              aria-label={`Remove the window starting ${w.startsOn}`}
+                              title="Drop this window from the plan"
+                              onClick={() => { void onCancelWindow(w.id); }}>
+                        <Trash2 className="size-3" />
+                      </Button>
+                    )}
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
 

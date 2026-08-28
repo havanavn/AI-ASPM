@@ -281,9 +281,12 @@ class OperationManifestTest {
                         List.of("PRD-AIC-056", "CFG-AIC-001", "SEC-PTR-007", "SEC-AUZ-017");
                 case "/api/ui/review-policy", "/api/ui/review-policy/{id}" ->
                         List.of("PRD-ASM-002", "CFG-ASM-001", "SEC-AUZ-017");
+                // Also serves the coverage tables: PRD-ASM-023 the absent-not-zero rate,
+                // PRD-ASM-024 the total that equals the sum of its groups, PRD-ASM-025 the tenant's
+                // own criticality tiers including the empty ones.
                 case "/api/ui/assessment-plan" ->
-                        List.of("PRD-AST-001", "PRD-ASM-003", "PRD-CAP-005", "PRD-UIX-011",
-                                "SEC-AUZ-016");
+                        List.of("PRD-AST-001", "PRD-ASM-003", "PRD-ASM-023", "PRD-ASM-024",
+                                "PRD-ASM-025", "PRD-CAP-005", "PRD-UIX-011", "SEC-AUZ-016");
                 // The plan. PRD-ASM-015 is the dated window itself; -016 keeps it out of every
                 // in-flight figure; -017 is several per year and the retained cancellation; -018 the
                 // explicit conversion. SEC-AUZ-016 the scope predicate, applied over every target in
@@ -292,6 +295,12 @@ class OperationManifestTest {
                      "/api/ui/assessment-plan/windows/{id}" ->
                         List.of("PRD-ASM-015", "PRD-ASM-016", "PRD-ASM-017", "PRD-ASM-018",
                                 "SEC-AUZ-016");
+                // The asserted review. PRD-ASM-019 is the record itself; -020 keeps asserted
+                // distinguishable from observed wherever coverage is reported; -021 the attributed
+                // author and the retained withdrawal. SEC-AUZ-016 the scope predicate.
+                case "/api/ui/assessment-plan/attestations",
+                     "/api/ui/assessment-plan/attestations/{id}/withdraw" ->
+                        List.of("PRD-ASM-019", "PRD-ASM-020", "PRD-ASM-021", "SEC-AUZ-016");
                 case "/api/ui/applications/{id}/posture", "/api/ui/projects/{id}/posture" ->
                         List.of("PRD-AST-001", "PRD-UIX-011", "PRD-UIX-022", "SEC-AUZ-016");
                 // Projects. PRD-AST-001 is the asset inventory, PRD-AST-005 the ownership claim a

@@ -55,6 +55,12 @@ INSERT INTO permission_catalogue (code, domain, label_i18n, is_restricted, requi
   ('asm.request.triage',  'ASM', '{"en":"Triage a request"}',               false, false),
   ('asm.request.accept',  'ASM', '{"en":"Accept a request"}',               false, false),
   ('asm.request.schedule','ASM', '{"en":"Schedule a request"}',             false, false),
+  -- Attesting that a review happened outside the platform. A SEPARATE permission and not part of any
+  -- existing one: it changes the coverage figure the whole platform reports, on one person's word, so
+  -- folding it into asm.request.qa or .approve would grant it to everyone who already holds those —
+  -- which nobody decided. A tenant must grant it deliberately before the feature works for anybody,
+  -- and that is the intended cost (ADR-066).
+  ('asm.review.attest',   'ASM', '{"en":"Attest to a review done outside the platform"}', false, false),
   ('asm.request.execute', 'ASM', '{"en":"Conduct an assessment"}',          false, false),
   ('asm.request.qa',      'ASM', '{"en":"Approve a report in QA"}',         false, false),
   ('asm.request.approve', 'ASM', '{"en":"Approve a request"}',              false, false),
@@ -163,7 +169,9 @@ BEGIN
         'org.node.read','org.nodetype.read','ast.asset.read','ast.assettype.read',
         'vul.finding.read','vul.finding.triage','asm.request.read','asm.request.update',
         'asm.request.triage','asm.request.accept','asm.request.schedule','asm.request.execute',
-        'asm.request.qa','asm.request.cancel','sbm.coverage.read','sbm.sbom.submit','cap.team.read'
+        'asm.request.qa','asm.request.cancel','sbm.coverage.read','sbm.sbom.submit','cap.team.read',
+        -- The people who ran the engagements are the people who know one happened.
+        'asm.review.attest'
     ]) AS c ON CONFLICT DO NOTHING;
 
     SELECT id INTO role_id FROM role WHERE tenant_id = t AND code = 'DEVELOPER';

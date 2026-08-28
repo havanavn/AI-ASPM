@@ -70,6 +70,10 @@ public final class PlatformEventTypes {
             // purpose: the plan and the record of work must be able to disagree, and an event that
             // said "assessment_request" for a window would put a plan into the history of work.
             "assessment_plan_window",
+            // An asserted review. Separate from `assessment_request` because the platform did not
+            // observe it: an event that said "assessment_request" for an attestation would put
+            // hearsay into the history of work the platform can substantiate.
+            "application_review_attestation",
             "rescan_schedule",
             "password_policy");
 

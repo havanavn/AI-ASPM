@@ -308,6 +308,11 @@ public final class AspmApplication {
                 new PathTemplate("/api/ui/assessment-plan/windows/{id}"),
                 webApi::planWindowUpdate));
         routes.add(new Dispatcher.Route("POST",
+                new PathTemplate("/api/ui/assessment-plan/attestations"), webApi::reviewAttest));
+        routes.add(new Dispatcher.Route("POST",
+                new PathTemplate("/api/ui/assessment-plan/attestations/{id}/withdraw"),
+                webApi::reviewAttestationWithdraw));
+        routes.add(new Dispatcher.Route("POST",
                 new PathTemplate("/api/ui/dependencies/artifact/{id}/sbom"),
                 webApi::uploadArtifactSbom));
         routes.add(new Dispatcher.Route("POST",

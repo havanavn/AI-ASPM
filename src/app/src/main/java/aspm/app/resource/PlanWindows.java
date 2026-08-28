@@ -66,6 +66,38 @@ public final class PlanWindows {
      */
     public static final int MAX_PER_REQUEST = 2_000;
 
+    /**
+     * How far back the plan is carried, in months.
+     *
+     * <p><b>This is the plan's horizon, not the chart's, and the difference is a defect that shipped.</b>
+     * The planning payload used to fetch windows over the Gantt's own {@code back}/{@code ahead} range
+     * — twelve months either side by default — while the per-application count that sits beside them
+     * counted every window regardless of date. A window planned for late 2027 was therefore COUNTED
+     * and not LISTED: the column read "4 planned" and the expanded row showed two of them, with
+     * nothing on screen explaining the other two. Reported from use.
+     *
+     * <p>So the horizon lives here, once, and both the list and the count are bounded by it. They
+     * cannot disagree because there is one definition of which windows are in the plan. The future is
+     * deliberately unbounded — a plan is made forwards and clipping it is what caused this — and only
+     * the past is trimmed, because a window that ended two years ago is history rather than plan and
+     * the Gantt would not draw it anyway.
+     */
+    public static final int PLAN_HISTORY_MONTHS = 24;
+
+    /**
+     * The SQL predicate for "in the plan", for the read models that count windows without listing them.
+     *
+     * <p>Exported as a fragment rather than written twice, so a count and a list cannot drift apart —
+     * which is exactly what {@link #PLAN_HISTORY_MONTHS} records happening.
+     */
+    // CONCATENATE THIS WITH AN EXPLICIT SPACE. A Java text block strips trailing whitespace from
+    // every line, so `... AND """ + IN_PLAN_HORIZON` produces `ANDw.ends_on ...` and Postgres answers
+    // `syntax error at or near "ANDw"`. That reached a running deployment: every call to the planning
+    // endpoint returned 500 and the page said the service was unavailable. Compilation cannot catch
+    // it, and neither can a source-scanning test — only executing the query does.
+    public static final String IN_PLAN_HORIZON =
+            "w.ends_on >= (current_date - interval '" + PLAN_HISTORY_MONTHS + " months')";
+
     /** A window as the interface reads it. Dates as ISO strings — the wire format is a date, not an instant. */
     public record Window(String id, String targetAssetId, String targetName, String targetTypeCode,
             String startsOn, String endsOn, String assessmentTypeId, String assessmentTypeName,
@@ -96,11 +128,10 @@ public final class PlanWindows {
      * two" is the planning finding and hiding the cancelled ones reports a plan that was always four.
      * The caller decides what to draw.
      *
-     * @param from inclusive; a window overlapping the range at either end is in range, because a
-     *     fortnight straddling 1 January belongs to both years a reader might be looking at
+     * <p>Bounded by {@link #PLAN_HISTORY_MONTHS} at the back and by nothing at the front, so the list
+     * and every count of it agree by construction. See that field for the defect this replaced.
      */
-    public List<Window> inRange(Principal principal, LocalDate from, LocalDate to)
-            throws SQLException {
+    public List<Window> inPlan(Principal principal) throws SQLException {
         Set<UUID> scope = principal == null ? Set.of() : principal.scopeNodeIds();
         if (scope.isEmpty()) {
             return List.of();
@@ -118,14 +149,12 @@ public final class PlanWindows {
                           JOIN asset_type t ON t.id = a.type_id
                           LEFT JOIN assessment_type ty ON ty.id = w.assessment_type_id
                           LEFT JOIN assessment_request r ON r.id = w.request_id
-                         WHERE w.ends_on >= ? AND w.starts_on <= ?
+                         WHERE %s
                            AND a.owning_node_id IN (SELECT descendant_id FROM org_closure
                                                      WHERE ancestor_id = ANY (?))
                          ORDER BY w.starts_on, a.display_name
-                        """)) {
-            statement.setObject(1, from);
-            statement.setObject(2, to);
-            statement.setArray(3, connection.createArrayOf("uuid", scope.toArray(new UUID[0])));
+                        """.formatted(IN_PLAN_HORIZON))) {
+            statement.setArray(1, connection.createArrayOf("uuid", scope.toArray(new UUID[0])));
             try (ResultSet r = statement.executeQuery()) {
                 while (r.next()) {
                     windows.add(new Window(r.getString(1), r.getString(2), r.getString(3),

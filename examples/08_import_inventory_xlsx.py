@@ -169,7 +169,57 @@ MAPPING = [
     (["passwordpolicy", "chinhsachmatkhau"], "auth:password", "folded into authentication_controls"),
     (["waf"], "attr:waf", None),
     (["captcharatelimit", "captcha", "ratelimit"], "attr:abuse_controls", None),
+    # ---- Reviews already carried out, from before the platform held them --------------------------
+    #
+    # These attach to the APPLICATION, not to the row's project, because the periodic obligation is
+    # per application. Several rows of one product therefore describe one review, and the first row
+    # that names a period wins — a second row naming the same period is skipped rather than recorded
+    # twice, and a second row naming a DIFFERENT period records a second review, which is correct for
+    # a product assessed more than once.
+    #
+    # Only `to` is required. A spreadsheet that remembers "assessed in April 2026" and not the exact
+    # fortnight gets a single-day period rather than a made-up range.
+    (["lastassessed", "landanhgiagannhat", "danhgiagannhat", "ngaydanhgia", "assessedon"],
+     "attest:to", "a review already carried out — asserted, not observed"),
+    (["assessedfrom", "danhgiatu", "batdaudanhgia", "assessmentstart"], "attest:from", None),
+    (["assessedby", "donvidanhgia", "nguoidanhgia", "assessor"], "attest:by", None),
+    (["assessmentreport", "baocaodanhgia", "linkbaocao", "reportref"], "attest:evidence", None),
 ]
+
+#: Date formats accepted in the assessment columns, tried in order.
+#:
+#: ISO first because that is what a well-kept sheet holds. The day-first forms come next because this
+#: is a Vietnamese-first product and 03/04/2026 means 3 April here — guessing month-first would put a
+#: review in the wrong quarter, silently, which is worse than refusing the cell.
+DATE_FORMATS = ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y", "%Y/%m/%d", "%m/%Y", "%Y-%m")
+
+
+def parse_date(raw: str):
+    """A date from a spreadsheet cell, or None with the reason reported by the caller.
+
+    A month-only cell ("04/2026") resolves to the LAST day of that month, because the column means
+    "when was it assessed" and an obligation is discharged when the work finished. Resolving it to the
+    1st would move the next due date a month earlier than the truth.
+    """
+    import calendar
+    import datetime
+
+    text = (raw or "").strip()
+    if not text:
+        return None
+    # openpyxl-free reader: a date cell may arrive as an Excel serial number.
+    if re.fullmatch(r"\d{5}", text):
+        return datetime.date(1899, 12, 30) + datetime.timedelta(days=int(text))
+    for fmt in DATE_FORMATS:
+        try:
+            parsed = datetime.datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+        if fmt in ("%m/%Y", "%Y-%m"):
+            last = calendar.monthrange(parsed.year, parsed.month)[1]
+            return parsed.replace(day=last)
+        return parsed
+    return None
 
 #: Free text -> the tenant's vocabulary. Everything not listed is REPORTED, never guessed.
 VALUES = {
@@ -384,6 +434,37 @@ def plan_row(row: dict, columns: dict, tenant, unmapped_policy: str) -> dict:
             (attributes.get("description", "") + "\n\n" if attributes.get("description") else "")
             + "Recorded from the import spreadsheet: " + " · ".join(notes))
 
+    # A review already carried out. Refused rather than guessed: an unparseable date silently dropped
+    # would leave an application reading "never reviewed" with a filled-in cell in the sheet saying
+    # otherwise, and nobody would look for the mismatch.
+    attestation = None
+    finished_raw = cell("attest:to")
+    if finished_raw:
+        finished = parse_date(finished_raw)
+        if not finished:
+            raise Problem(f"cannot read the assessment date {finished_raw!r}. Accepted: "
+                          f"{', '.join(DATE_FORMATS)}, or an Excel date cell")
+        started_raw = cell("attest:from")
+        started = parse_date(started_raw) if started_raw else None
+        if started_raw and not started:
+            raise Problem(f"cannot read the assessment start date {started_raw!r}")
+        if started and started > finished:
+            raise Problem(f"the assessment start {started} is after its end {finished}")
+        import datetime
+        if finished > datetime.date.today():
+            raise Problem(f"the assessment date {finished} is in the future. This column records "
+                          f"work already done; future work is planned on the planning screen")
+        attestation = {
+            "performedFrom": (started or finished).isoformat(),
+            "performedTo": finished.isoformat(),
+            "performedBy": cell("attest:by") or None,
+            "evidenceRef": cell("attest:evidence") or None,
+            "note": "Imported from the inventory spreadsheet",
+        }
+        if not attestation["evidenceRef"]:
+            warnings.append("assessment recorded with no report reference — it will show as the "
+                            "weaker claim it is")
+
     return {
         "application": cell("application"),
         "project": project_name,
@@ -394,6 +475,7 @@ def plan_row(row: dict, columns: dict, tenant, unmapped_policy: str) -> dict:
         "repository": cell("repository"),
         "attributes": attributes,
         "domains": domains,
+        "attestation": attestation,
         "warnings": warnings,
     }
 
@@ -409,6 +491,7 @@ NEEDS = {
     "/api/v1/org-nodes": "org.node.read",
     "/api/v1/criticality-tiers": "org.nodetype.read",
     "/api/ui/people": "asm.request.read",
+    "/api/ui/assessment-plan": "ast.asset.read",
     "/api/ui/settings/fields": "ast.asset.read",
 }
 
@@ -497,8 +580,32 @@ def find_asset(api: Aspm, name: str, type_id: str, cache: dict) -> dict | None:
     return cache[type_id].get(name.strip().casefold())
 
 
-def apply_plan(api: Aspm, plan: dict, tenant: dict, cache: dict) -> dict:
-    outcome = {"application": None, "project": None, "created": [], "edge_missing": False}
+def existing_attestations(api: Aspm) -> set:
+    """`(application id, end date)` for every review already asserted.
+
+    Read once, before any row is applied, so re-running the importer over the same sheet does not
+    assert the same review a second time. This matters more than it looks: the importer is EXPECTED to
+    be re-run — a spreadsheet gets corrected and loaded again — and duplicate assertions would inflate
+    the attested count while leaving the coverage date unchanged, which is the confusing half of a
+    double-count.
+
+    A missing permission or an older platform yields an empty set and the caller proceeds; the cost is
+    a possible duplicate, which is better than refusing the whole import over a read.
+    """
+    try:
+        plan = api.get("/api/ui/assessment-plan") or {}
+    except Exception as failure:                                    # noqa: BLE001 - reported, not raised
+        print(f"  ! could not read existing assertions ({failure}); duplicates are possible",
+              file=sys.stderr)
+        return set()
+    return {(a.get("assetId"), a.get("performedTo"))
+            for a in plan.get("attestations", [])
+            if not a.get("withdrawnAt")}
+
+
+def apply_plan(api: Aspm, plan: dict, tenant: dict, cache: dict, asserted: set | None = None) -> dict:
+    outcome = {"application": None, "project": None, "created": [], "edge_missing": False,
+               "attested": None}
 
     if plan["application"]:
         app = find_asset(api, plan["application"], tenant["types"]["APPLICATION"], cache)
@@ -542,6 +649,22 @@ def apply_plan(api: Aspm, plan: dict, tenant: dict, cache: dict) -> dict:
         "repositoryBranch": current.get("repositoryBranch", ""),
         "domains": plan["domains"],
     })
+
+    # The asserted review, against the APPLICATION — the periodic obligation is per application, so
+    # an assertion against this row's project would discharge nothing while looking as though it had.
+    if plan.get("attestation") and outcome["application"]:
+        key = (outcome["application"], plan["attestation"]["performedTo"])
+        if asserted is not None and key in asserted:
+            outcome["attested"] = "already recorded"
+        else:
+            api.post("/api/ui/assessment-plan/attestations",
+                     {"assetId": outcome["application"], **plan["attestation"]})
+            if asserted is not None:
+                asserted.add(key)
+            outcome["attested"] = plan["attestation"]["performedTo"]
+    elif plan.get("attestation"):
+        # No application column in this row, so there is nothing the obligation is measured against.
+        outcome["attested"] = "skipped — no application named in this row"
 
     outcome["edge_missing"] = bool(plan["application"])
     return outcome
@@ -680,12 +803,21 @@ def main() -> int:
                          "the sheet:\n    " + "\n    ".join(failures[:10]))
 
     cache, links, applied = {}, [], 0
+    # Read once, up front: re-running this importer must not assert the same review twice.
+    asserted = existing_attestations(api) if any(p.get("attestation") for _, p in plans) else set()
+    attested_count = 0
     for index, plan in plans:
         try:
-            outcome = apply_plan(api, plan, tenant, cache)
+            outcome = apply_plan(api, plan, tenant, cache, asserted)
             applied += 1
             created = "+".join(outcome["created"]) or "updated"
-            print(f"    row {index}  {plan['project'][:38]:<40} {created}")
+            note = ""
+            if outcome.get("attested"):
+                note = f"   review asserted: {outcome['attested']}"
+                if outcome["attested"] not in ("already recorded",) \
+                        and not outcome["attested"].startswith("skipped"):
+                    attested_count += 1
+            print(f"    row {index}  {plan['project'][:38]:<40} {created}{note}")
             if outcome["edge_missing"] and outcome["application"]:
                 links.append((outcome["application"], outcome["project"],
                               f"{plan['application']} contains {plan['project']}"))
@@ -693,6 +825,10 @@ def main() -> int:
             print(f"    row {index}  {plan['project'][:38]:<40} FAILED: {failure}", file=sys.stderr)
 
     print(f"\n  {applied} of {len(plans)} row(s) written.")
+    if attested_count:
+        print(f"  {attested_count} review(s) recorded as ASSERTED, not observed — the platform did")
+        print("    not watch this work. They reset the periodic clock and are labelled as asserted")
+        print("    everywhere they appear, including in exports.")
     if links:
         print(f"\n  ⚠ {len(links)} service(s) have NO application above them. No API creates that")
         print("    edge, so they will show an empty application column and will not roll up.")

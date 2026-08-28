@@ -347,6 +347,10 @@ class ApplicationTierTest {
             // 209: the estate graph — one read. No SPA page of its own: it opens as a drawer over
             // the dashboard the reader is already on, so there is no class-G shell operation.
             //
+            // 214: the asserted review — one write to record a review the platform did not observe,
+            // one to withdraw the assertion. Both class B and both behind their own permission rather
+            // than an existing one, because either of them moves a coverage figure on one person's
+            // word; the count going up by two is the whole of that new authority.
             // 212: the assessment plan gained a write surface — two operations, one to lay windows out
             // in bulk and one to move, cancel or discharge a single window. Both class B: a window is
             // scoped by its target and every target in a batch is re-validated inside the transaction
@@ -354,7 +358,7 @@ class ApplicationTierTest {
             // 210: the application inventory export — one read. It calls the list handler rather
             // than querying again, so there is one definition of "the inventory" and the file and
             // the screen cannot disagree.
-            assertEquals(212, registry.all().size(), "registered: " + registry.all().size());
+            assertEquals(214, registry.all().size(), "registered: " + registry.all().size());
         }
 
         @Test

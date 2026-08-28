@@ -68,6 +68,7 @@ public final class UiApi {
 
     private final aspm.app.resource.SubmissionHealth submissionHealth;
     private final aspm.app.resource.PlanWindows planWindows;
+    private final aspm.app.resource.ReviewAttestations attestations;
 
     /**
      * The trail an export leaves behind.
@@ -102,6 +103,7 @@ public final class UiApi {
         this.lifecycle = new aspm.app.resource.FindingLifecycle(dataSource);
         this.submissionHealth = new aspm.app.resource.SubmissionHealth(dataSource);
         this.planWindows = new aspm.app.resource.PlanWindows(dataSource);
+        this.attestations = new aspm.app.resource.ReviewAttestations(dataSource);
     }
 
     /**
@@ -146,6 +148,10 @@ public final class UiApi {
             entry.put("apiCount", row.apiCount());
             entry.put("projectCount", row.projectCount());
             entry.put("plannedWindows", row.plannedWindows());
+            // How the platform knows about the last review. A date with no source beside it invites a
+            // reader to treat one person's word as evidence the platform holds (ADR-066).
+            entry.put("attestedCount", row.attestedCount());
+            entry.put("lastReviewSource", row.lastReviewSource());
             rows.add(entry);
         }
         List<Map<String, Object>> bars = new ArrayList<>();
@@ -211,13 +217,14 @@ public final class UiApi {
         body.put("mayManagePolicy", Boolean.valueOf(
                 principal.holds(aspm.app.resource.ReviewPolicyService.MANAGE)));
         body.put("maySchedule", Boolean.valueOf(principal.holds("asm.request.create")));
-        // The planned windows, over the SAME range the Gantt was asked for. A plan fetched over a
-        // different span than the bars beside it would draw a window with no lane to sit in.
-        java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneOffset.UTC);
+        // The whole plan, NOT the Gantt's range.
+        //
+        // It used to be the Gantt's range, and that was a defect: the per-application count beside
+        // the list counted every window while the list stopped twelve months out, so a plan made for
+        // late next year was counted and not shown. The chart clips what it cannot draw — that is the
+        // chart's job — but the plan the page reports has to be the whole plan.
         List<Map<String, Object>> windows = new ArrayList<>();
-        for (var window : planWindows.inRange(principal,
-                today.minusMonths(back).withDayOfMonth(1),
-                today.plusMonths(ahead).withDayOfMonth(1).plusMonths(1).minusDays(1))) {
+        for (var window : planWindows.inPlan(principal)) {
             Map<String, Object> entry = new LinkedHashMap<>();
             entry.put("id", window.id());
             entry.put("targetAssetId", window.targetAssetId());
@@ -237,7 +244,139 @@ public final class UiApi {
         // what a window is; a new permission would need granting in every tenant before the feature
         // worked anywhere, and ADR-027 fixes the catalogue at product level for that reason.
         body.put("mayPlan", Boolean.valueOf(principal.holds(PLAN_WINDOW_PERMISSION)));
+        // The asserted reviews, withdrawn ones included and marked. A retracted claim is what a later
+        // look at the coverage figures needs to see; hiding it reports a claim never made.
+        List<Map<String, Object>> attested = new ArrayList<>();
+        for (var row : attestations.forScope(principal)) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("id", row.id());
+            entry.put("assetId", row.assetId());
+            entry.put("assetName", row.assetName());
+            entry.put("performedFrom", row.performedFrom());
+            entry.put("performedTo", row.performedTo());
+            entry.put("performedBy", row.performedBy());
+            entry.put("evidenceRef", row.evidenceRef());
+            entry.put("note", row.note());
+            entry.put("attestedByName", row.attestedByName());
+            entry.put("attestedAt", row.attestedAt());
+            entry.put("withdrawnAt", row.withdrawnAt());
+            entry.put("withdrawalReason", row.withdrawalReason());
+            attested.add(entry);
+        }
+        body.put("attestations", attested);
+        body.put("mayAttest", Boolean.valueOf(
+                principal.holds(aspm.app.resource.ReviewAttestations.ATTEST)));
+
+        // The coverage tables. Computed from ONE per-application query and folded in memory, so the
+        // total row is the sum of the organization rows by construction rather than by a second query
+        // that could apply a different predicate and disagree with the rows beneath it.
+        int statsYear = clamp(request.query().get("year"),
+                java.time.LocalDate.now(java.time.ZoneOffset.UTC).getYear(), 2000, 2100);
+        var report = aspm.app.resource.PlanStatistics.of(
+                plan.coverage(principal, filter, statsYear), plan.tiers(principal), statsYear);
+        List<Map<String, Object>> tierColumns = new ArrayList<>();
+        for (var tier : report.tiers()) {
+            tierColumns.add(Map.of("code", tier.code(), "label", tier.label(),
+                    "ordinal", Integer.valueOf(tier.ordinal())));
+        }
+        List<Map<String, Object>> groups = new ArrayList<>();
+        for (var group : report.groups()) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("orgId", group.orgId());
+            entry.put("orgName", group.orgName());
+            entry.put("total", Boolean.valueOf(group.total()));
+            entry.put("applications", Long.valueOf(group.applications()));
+            Map<String, Object> planFigures = new LinkedHashMap<>();
+            planFigures.put("planned", Long.valueOf(group.plan().planned()));
+            planFigures.put("converted", Long.valueOf(group.plan().converted()));
+            planFigures.put("done", Long.valueOf(group.plan().done()));
+            planFigures.put("missed", Long.valueOf(group.plan().missed()));
+            planFigures.put("cancelled", Long.valueOf(group.plan().cancelled()));
+            // Null where nothing was planned. A 0% completion rate would claim work was planned and
+            // none of it done, which is a different and worse statement than "no plan".
+            planFigures.put("completion", group.plan().completion());
+            entry.put("plan", planFigures);
+            entry.put("byTier", group.byTier());
+            entry.put("tierUnset", Long.valueOf(group.tierUnset()));
+            Map<String, Object> frequency = new LinkedHashMap<>();
+            frequency.put("none", Long.valueOf(group.frequency().none()));
+            frequency.put("once", Long.valueOf(group.frequency().once()));
+            frequency.put("twice", Long.valueOf(group.frequency().twice()));
+            frequency.put("more", Long.valueOf(group.frequency().more()));
+            frequency.put("attested", Long.valueOf(group.frequency().attested()));
+            frequency.put("covered", group.frequency().covered());
+            entry.put("frequency", frequency);
+            groups.add(entry);
+        }
+        Map<String, Object> statistics = new LinkedHashMap<>();
+        statistics.put("year", Integer.valueOf(report.year()));
+        statistics.put("tiers", tierColumns);
+        statistics.put("groups", groups);
+        body.put("statistics", statistics);
         return json(body);
+    }
+
+    /**
+     * {@code POST /api/ui/assessment-plan/attestations}. Asserting that a review happened.
+     *
+     * <p>For the case no relabelling can reach: work done before the platform existed, with no request
+     * to attach a trigger to. The alternative — a backdated request with a fabricated execution record
+     * and terminal transition — was rejected in ADR-066, because it would write a workflow history
+     * nobody lived into a log {@code PRD-PLT-001} names as unreconstructable.
+     *
+     * <p>Where a request DOES exist and simply was not marked as a periodic review, this is the wrong
+     * endpoint: set the request's trigger instead, which makes it count as the observed review it was.
+     */
+    public Dispatcher.Response reviewAttest(Dispatcher.Request request) throws Exception {
+        Principal principal = request.principal();
+        Map<String, Object> payload = request.body().orElse(Map.of());
+        UUID assetId = uuid(text(payload.get("assetId")));
+        java.time.LocalDate from = date(payload.get("performedFrom"));
+        java.time.LocalDate to = date(payload.get("performedTo"));
+        if (assetId == null) {
+            return rejected("ASSET_REQUIRED", "assetId",
+                    "an attestation is about one application");
+        }
+        if (from == null || to == null) {
+            return rejected("PERIOD_REQUIRED", "performedFrom",
+                    "state the period the work covered, both dates as YYYY-MM-DD");
+        }
+        java.util.Optional<UUID> created;
+        try {
+            created = attestations.attest(principal,
+                    new aspm.app.resource.ReviewAttestations.Draft(assetId, from, to,
+                            text(payload.get("performedBy")), text(payload.get("evidenceRef")),
+                            text(payload.get("note"))));
+        } catch (IllegalArgumentException refused) {
+            return rejected("ATTESTATION_REFUSED", "performedTo", refused.getMessage());
+        }
+        return created.isPresent() ? json(Map.of("id", created.get().toString()))
+                : Dispatcher.Response.notFound();
+    }
+
+    /**
+     * {@code POST /api/ui/assessment-plan/attestations/{id}/withdraw}. Taking an assertion back.
+     *
+     * <p>The row is kept. That a claim was made and retracted is what a later review of the coverage
+     * figures needs to see, and a reason is required because "it was wrong" and "the evidence did not
+     * support it" have different consequences for the figure it was propping up.
+     */
+    public Dispatcher.Response reviewAttestationWithdraw(Dispatcher.Request request)
+            throws Exception {
+        Principal principal = request.principal();
+        UUID id = uuid(request.pathVariables().get("id"));
+        if (id == null) {
+            return Dispatcher.Response.notFound();
+        }
+        Map<String, Object> payload = request.body().orElse(Map.of());
+        java.util.Optional<UUID> applied;
+        try {
+            applied = attestations.withdraw(principal, id, text(payload.get("reason")));
+        } catch (IllegalArgumentException refused) {
+            return rejected("REASON_REQUIRED", "reason", refused.getMessage());
+        }
+        return applied.isPresent() ? json(Map.of("id", id.toString()))
+                : Dispatcher.Response.notFound();
     }
 
     /**

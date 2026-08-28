@@ -1,213 +1,215 @@
 method,path,annotation_class,permission,resource_group,traces_to
-GET,/api/v1/org-node-types,A_SCOPED_READ,org.nodetype.read,org-node-types,CFG-ORG-001 PRD-ORG-004
-GET,/attachments/{id},A_SCOPED_READ,asm.request.read,/attachments/{id},PRD-ASM-007 PRD-ASM-012 PRD-PTR-005
-POST,/api/ui/board/{id}/findings/{findingId}/comments,B_SCOPED_WRITE,asm.request.read,board,PRD-ASM-007 PRD-ASM-012 PRD-VUL-001
-GET,/api/ui/account,G_UNAUTHENTICATED,unauthenticated,account,SEC-SEC-012 SEC-SEC-016
-GET,/overview,G_UNAUTHENTICATED,unauthenticated,/overview,PRD-UIX-006 INT-UIX-004
-GET,/vulnerabilities,G_UNAUTHENTICATED,unauthenticated,/vulnerabilities,PRD-UIX-006 INT-UIX-004
-GET,/api,G_UNAUTHENTICATED,unauthenticated,/api,PRD-API-036
-GET,/api/ui/composition,A_SCOPED_READ,sbm.coverage.read,composition,PRD-SBM-056 PRD-SBM-032
-POST,/api/ui/teams/{id}/retire,E_CONFIGURATION,cap.team.manage,teams,PRD-CAP-001 PRD-CAP-013 PRD-AUZ-001
-GET,/app,G_UNAUTHENTICATED,unauthenticated,/app,PRD-API-036 INT-UIX-003
-POST,/api/ui/settings/fields/{id},E_CONFIGURATION,cfg.asset.field.manage,settings,PRD-AST-014 PRD-TEN-004 PRD-AUZ-006
-GET,/app/{a}/{b}/{c},G_UNAUTHENTICATED,unauthenticated,/app/{a}/{b}/{c},PRD-API-036 INT-UIX-003
-POST,/api/ui/access/users/{id}/reset,C_RESTRICTED_REVEAL,iam.credential.reset,access,PRD-IAM-007 SEC-SEC-016 SEC-AUZ-017
-GET,/api/ui/applications/{id}/editor,A_SCOPED_READ,ast.asset.update,applications,PRD-AST-001 PRD-AST-008 SEC-AUZ-016
-GET,/api/ui/projects/{id}/posture,A_SCOPED_READ,ast.asset.read,projects,PRD-AST-001 PRD-UIX-011 PRD-UIX-022 SEC-AUZ-016
-GET,/api-guide,G_UNAUTHENTICATED,unauthenticated,/api-guide,PRD-PLT-007 INT-UIX-008
-POST,/api/ui/settings/fields,E_CONFIGURATION,cfg.asset.field.manage,settings,PRD-AST-014 PRD-TEN-004 PRD-AUZ-006
-GET,/guide,G_UNAUTHENTICATED,unauthenticated,/guide,PRD-PLT-007 INT-UIX-008
-POST,/api/v1/rescans/{id},F_SERVICE_INGEST,sbm.scan.run,rescans,PRD-SBM-035 PRD-SBM-056 SEC-AUZ-016
-GET,/ui,G_UNAUTHENTICATED,unauthenticated,/ui,PRD-API-036 INT-UIX-003
-GET,/api/ui/overview,A_SCOPED_READ,vul.finding.read,overview,PRD-UIX-011 PRD-UIX-022 SEC-AUZ-016
-GET,/api/v1/asset-types,A_SCOPED_READ,ast.assettype.read,asset-types,PRD-AST-001 PRD-AST-002
-POST,/api/ui/service-credentials/{id}/revoke,E_CONFIGURATION,sbm.credential.manage,service-credentials,PRD-IAM-003 PRD-AUZ-002 SEC-SEC-004
-GET,/brand/icon-180.png,G_UNAUTHENTICATED,unauthenticated,/brand/icon-180.png,PRD-UIX-006 INT-UIX-004
-POST,/api/ui/board/{id}/findings/{findingId}/remediation,B_SCOPED_WRITE,asm.request.read,board,PRD-VUL-001 PRD-WRK-032 SEC-AUZ-017
-GET,/roles/{id},G_UNAUTHENTICATED,unauthenticated,/roles/{id},PRD-AUZ-001 SEC-SEC-004
-POST,/api/v1/org-node-types,E_CONFIGURATION,org.nodetype.manage,org-node-types,CFG-ORG-001 PRD-ORG-004
-POST,/api/ui/teams/members,E_CONFIGURATION,cap.team.manage,teams,PRD-CAP-001 PRD-CAP-013 PRD-AUZ-001
-GET,/pipeline/findings/{id},G_UNAUTHENTICATED,unauthenticated,/pipeline/findings/{id},PRD-UIX-006 INT-UIX-004
-POST,/api/v1/sbom-submissions,F_SERVICE_INGEST,sbm.sbom.submit,sbom-submissions,PRD-API-038 PRD-API-039 PRD-SBM-037
-POST,/api/ui/settings/environments/{id}/lifecycle,E_CONFIGURATION,cfg.asset.field.manage,settings,CFG-AST-002 PRD-AST-004 PRD-TEN-004 PRD-AUZ-006
-GET,/,G_UNAUTHENTICATED,unauthenticated,/,PRD-UIX-006 INT-UIX-004
-GET,/applications/{id},G_UNAUTHENTICATED,unauthenticated,/applications/{id},PRD-AST-001 PRD-AST-008 SEC-AUZ-016 SEC-AUZ-017
-POST,/api/ui/board/{id}/findings/{findingId},B_SCOPED_WRITE,vul.finding.triage,board,PRD-ASM-007 PRD-ASM-012 PRD-VUL-001
-POST,/api/v1/requests/{id}/transitions,B_SCOPED_WRITE,asm.request.update,requests,PRD-WRK-031 PRD-WRK-032 PRD-WRK-036
-PATCH,/api/v1/findings/{id},B_SCOPED_WRITE,vul.finding.triage,findings,PRD-VUL-001 SEC-AUZ-016
-GET,/assets/{name},G_UNAUTHENTICATED,unauthenticated,/assets/{name},PRD-UIX-006 INT-UIX-004
-POST,/api/ui/projects/{id}/editor,B_SCOPED_WRITE,ast.asset.update,projects,PRD-AST-004 PRD-AST-014 PRD-AST-016 SEC-AUZ-017
-POST,/api/ui/board/{id}/participants,E_CONFIGURATION,asm.request.read,board,PRD-AUZ-002 SEC-AUZ-014 SEC-AUZ-017
-POST,/api/ui/settings/environments/{id},E_CONFIGURATION,cfg.asset.field.manage,settings,CFG-AST-002 PRD-AST-004 PRD-TEN-004 PRD-AUZ-006
-GET,/mfa-enrol,G_UNAUTHENTICATED,unauthenticated,/mfa-enrol,SEC-SEC-003 PRD-IAM-002
-POST,/api/ui/organization/{id}/deprecate,E_CONFIGURATION,org.node.update,organization,PRD-ORG-001 PRD-ORG-003 PRD-ORG-006 SEC-AUZ-017
-GET,/api/ui/vulnerabilities/export,A_SCOPED_READ,vul.finding.read,vulnerabilities,PRD-VUL-013 PRD-VUL-015 PRD-UIX-011 SEC-AUZ-016
-POST,/api/ui/alerts/{id}/active,E_CONFIGURATION,sbm.alert.manage,alerts,PRD-NTF-001 PRD-SBM-056 SEC-AUZ-016
-POST,/api/ui/board/{id}/transitions,B_SCOPED_WRITE,asm.request.update,board,PRD-PTR-021 PRD-ASM-003 SEC-AUZ-016
-GET,/api/ui/workload/analytics,A_SCOPED_READ,cap.team.read,workload,PRD-CAP-005 PRD-CAP-008 PRD-CAP-013 PRD-CAP-014
-GET,/sign-in,G_UNAUTHENTICATED,unauthenticated,/sign-in,SEC-SEC-005 SEC-SEC-013 SEC-TEN-004
-POST,/api/v1/criticality-tiers,E_CONFIGURATION,org.nodetype.manage,criticality-tiers,CFG-ORG-001 PRD-ORG-006
-GET,/api/ui/dependencies/advisories,A_SCOPED_READ,sbm.coverage.read,dependencies,PRD-SBM-035 PRD-SBM-056 SEC-AUZ-016
-GET,/workload,G_UNAUTHENTICATED,unauthenticated,/workload,PRD-CAP-005 PRD-CAP-008 PRD-CAP-013 PRD-CAP-014
-GET,/composition,G_UNAUTHENTICATED,unauthenticated,/composition,PRD-SBM-056 PRD-SBM-032
-GET,/api/v1/requests/{id},A_SCOPED_READ,asm.request.read,requests,PRD-PTR-021 PRD-ASM-003 SEC-AUZ-016
-GET,/ui/{a},G_UNAUTHENTICATED,unauthenticated,{a},PRD-API-036 INT-UIX-003
-POST,/api/v1/finding-imports,F_SERVICE_INGEST,ing.findings.import,finding-imports,PRD-ING-024 PRD-ING-027 PRD-ING-040 PRD-ING-041
-GET,/ui/{a}/{b}/{c},G_UNAUTHENTICATED,unauthenticated,{a},PRD-API-036 INT-UIX-003
-GET,/api/ui/projects/{id}/access,A_SCOPED_READ,ast.asset.read,projects,PRD-AUZ-002 SEC-AUZ-014 SEC-AUZ-017
-POST,/security-policy,E_CONFIGURATION,iam.user.manage,/security-policy,PRD-IAM-007 PRD-IAM-006 SEC-SEC-006
-GET,/api/ui/board/{id}/comments,A_SCOPED_READ,asm.request.read,board,PRD-ASM-007 PRD-ASM-012 PRD-VUL-001
-GET,/api/ui/applications/{id}/posture,A_SCOPED_READ,ast.asset.read,applications,PRD-AST-001 PRD-UIX-011 PRD-UIX-022 SEC-AUZ-016
-GET,/api/ui/dependencies,A_SCOPED_READ,sbm.coverage.read,dependencies,PRD-SBM-035 PRD-SBM-056 SEC-AUZ-016
-POST,/api/ui/applications,B_SCOPED_WRITE,ast.asset.create,applications,PRD-AST-001 PRD-AST-008 SEC-AUZ-016
-GET,/api/ui/workload,A_SCOPED_READ,cap.team.read,workload,PRD-CAP-005 PRD-CAP-008 PRD-CAP-013 PRD-CAP-014
-GET,/ui/{a}/{b}/{c}/{d},G_UNAUTHENTICATED,unauthenticated,{a},PRD-API-036 INT-UIX-003
-POST,/api/ui/settings/environments,E_CONFIGURATION,cfg.asset.field.manage,settings,CFG-AST-002 PRD-AST-004 PRD-TEN-004 PRD-AUZ-006
-GET,/api/ui/top-weaknesses,A_SCOPED_READ,vul.finding.read,top-weaknesses,PRD-VUL-013 PRD-UIX-011 SEC-AUZ-016
-GET,/api/ui/board/{id}/participants,A_SCOPED_READ,asm.request.read,board,PRD-AUZ-002 SEC-AUZ-014 SEC-AUZ-017
-GET,/ui/{a}/{b},G_UNAUTHENTICATED,unauthenticated,{a},PRD-API-036 INT-UIX-003
-GET,/api/v1/rescans/pending,F_SERVICE_INGEST,sbm.scan.run,rescans,PRD-SBM-035 PRD-SBM-056 SEC-AUZ-016
-GET,/security-policy,A_SCOPED_READ,iam.user.manage,/security-policy,PRD-IAM-007 PRD-IAM-006 SEC-SEC-006
-POST,/api/ui/ai-providers/{id}/active,E_CONFIGURATION,cfg.ai.manage,ai-providers,PRD-AIC-056 CFG-AIC-001 SEC-PTR-007 SEC-AUZ-017
-GET,/api/ui/dependencies/node,A_SCOPED_READ,sbm.coverage.read,dependencies,PRD-SBM-035 PRD-SBM-056 SEC-AUZ-016
-GET,/api/ui/hosts,A_SCOPED_READ,ast.asset.read,hosts,PRD-AST-002 PRD-AST-004 SEC-AUZ-016
-POST,/api/ui/organization,E_CONFIGURATION,org.node.create,organization,PRD-ORG-001 SEC-AUZ-010 SEC-AUZ-016
-GET,/api/ui/rescan-schedule,A_SCOPED_READ,sbm.alert.manage,rescan-schedule,PRD-SBM-035 PRD-SBM-056 SEC-AUZ-016
-GET,/api/ui/ai-providers,A_SCOPED_READ,cfg.ai.manage,ai-providers,PRD-AIC-056 CFG-AIC-001 SEC-PTR-007 SEC-AUZ-017
-GET,/projects/{id},G_UNAUTHENTICATED,unauthenticated,/projects/{id},PRD-UIX-006 INT-UIX-004
-GET,/api/v1/requests/{id}/transitions,A_SCOPED_READ,asm.request.read,requests,PRD-WRK-031 PRD-WRK-032 PRD-WRK-036
-GET,/analytics,G_UNAUTHENTICATED,unauthenticated,/analytics,PRD-UIX-006 INT-UIX-004
-POST,/api/v1/session-reap,F_SERVICE_INGEST,iam.session.reap,session-reap,SEC-SEC-012 SEC-SEC-016 OPS-DEP-007
-GET,/api/ui/access,A_SCOPED_READ,iam.user.read,access,PRD-AUZ-001 SEC-AUZ-014
-GET,/api/ui/settings/environments,A_SCOPED_READ,ast.asset.read,settings,CFG-AST-002 PRD-AST-004 PRD-TEN-004 PRD-AUZ-006
-GET,/api/v1/criticality-tiers/{id},A_SCOPED_READ,org.nodetype.read,criticality-tiers,CFG-ORG-001 PRD-ORG-006
-GET,/api/ui/suggestions,A_SCOPED_READ,aic.suggestion.read,suggestions,PRD-AIC-056 CFG-AIC-001 SEC-AUZ-017
-GET,/api/ui/api-guide,G_UNAUTHENTICATED,unauthenticated,api-guide,PRD-PLT-007 INT-UIX-008
 GET,/api/ui/findings/{id},A_SCOPED_READ,vul.finding.read,findings,PRD-VUL-002 PRD-VUL-004 SEC-AUZ-016
-GET,/api/ui/service-credentials,A_SCOPED_READ,sbm.credential.manage,service-credentials,PRD-IAM-003 PRD-AUZ-002 SEC-SEC-004
-GET,/board/{id}/findings/{findingId},G_UNAUTHENTICATED,unauthenticated,/board/{id}/findings/{findingId},PRD-VUL-001 PRD-ASM-003 SEC-AUZ-017
-GET,/api/ui/applications/{id},A_SCOPED_READ,ast.asset.read,applications,PRD-AST-001 PRD-AST-008 SEC-AUZ-016
-POST,/api/ui/roles,E_CONFIGURATION,auz.role.manage,roles,PRD-AUZ-001 PRD-AUZ-002 PRD-AUZ-006
-GET,/app/{a},G_UNAUTHENTICATED,unauthenticated,/app/{a},PRD-API-036 INT-UIX-003
-POST,/api/ui/rescan-schedule,E_CONFIGURATION,sbm.alert.manage,rescan-schedule,PRD-SBM-035 PRD-SBM-056 SEC-AUZ-016
-GET,/account,G_UNAUTHENTICATED,unauthenticated,/account,SEC-SEC-012 PRD-IAM-007
-GET,/sign-out,G_UNAUTHENTICATED,unauthenticated,/sign-out,SEC-SEC-011 SEC-SEC-012
-PATCH,/api/v1/criticality-tiers/{id},E_CONFIGURATION,org.nodetype.manage,criticality-tiers,CFG-ORG-001 PRD-ORG-006
-POST,/api/ui/alerts,E_CONFIGURATION,sbm.alert.manage,alerts,PRD-NTF-001 PRD-SBM-056 SEC-AUZ-016
-POST,/api/ui/findings/{id}/transition,B_SCOPED_WRITE,vul.finding.read,findings,PRD-VUL-001 SEC-AUZ-016
-GET,/api/ui/alerts,A_SCOPED_READ,sbm.alert.manage,alerts,PRD-NTF-001 PRD-SBM-056 SEC-AUZ-016
-GET,/api/ui/session/keepalive,G_UNAUTHENTICATED,unauthenticated,session,SEC-SEC-010 SEC-SEC-011
-POST,/api/ui/board/{id}/comments,B_SCOPED_WRITE,asm.request.read,board,PRD-ASM-007 PRD-ASM-012 PRD-VUL-001
-POST,/api/ui/projects/{id}/access,E_CONFIGURATION,ast.asset.read,projects,PRD-AUZ-002 SEC-AUZ-014 SEC-AUZ-017
-GET,/api/v1/org-nodes/{id},A_SCOPED_READ,org.node.read,org-nodes,PRD-ORG-001 SEC-AUZ-010 SEC-AUZ-016
-POST,/api/ui/assessment-plan/windows,B_SCOPED_WRITE,asm.request.schedule,assessment-plan,PRD-ASM-015 PRD-ASM-016 PRD-ASM-017 PRD-ASM-018 SEC-AUZ-016
-GET,/api/ui/dependencies/export,A_SCOPED_READ,sbm.coverage.read,dependencies,PRD-SBM-035 PRD-SBM-056 SEC-AUZ-016
-POST,/api/v1/asset-types,E_CONFIGURATION,ast.assettype.manage,asset-types,PRD-AST-001 PRD-AST-002
-PATCH,/api/ui/assessment-plan/windows/{id},B_SCOPED_WRITE,asm.request.schedule,assessment-plan,PRD-ASM-015 PRD-ASM-016 PRD-ASM-017 PRD-ASM-018 SEC-AUZ-016
-GET,/projects,G_UNAUTHENTICATED,unauthenticated,/projects,PRD-UIX-006 INT-UIX-004
-POST,/api/ui/roles/{id},E_CONFIGURATION,auz.role.manage,roles,PRD-AUZ-001 PRD-AUZ-002 PRD-AUZ-006
-POST,/api/ui/agents/analyse,B_SCOPED_WRITE,aic.suggestion.promote,agents,PRD-AIC-056 CFG-AIC-001 SEC-AUZ-017
-GET,/mfa,G_UNAUTHENTICATED,unauthenticated,/mfa,SEC-SEC-003 SEC-SEC-009
-POST,/api/ui/agents/{code}/run,B_SCOPED_WRITE,aic.capability.manage,agents,PRD-AIC-056 CFG-AIC-001 SEC-AUZ-017
-GET,/api/ui/roles,A_SCOPED_READ,auz.role.manage,roles,PRD-AUZ-001 PRD-AUZ-002 PRD-AUZ-006
-GET,/hosts,G_UNAUTHENTICATED,unauthenticated,/hosts,PRD-UIX-006 INT-UIX-004
-GET,/api/v1/assets/{id},A_SCOPED_READ,ast.asset.read,assets,PRD-AST-001 PRD-AST-008 SEC-AUZ-016
-GET,/app.js,G_UNAUTHENTICATED,unauthenticated,/app.js,PRD-UIX-013 INT-UIX-003
-GET,/access/users/{id},G_UNAUTHENTICATED,unauthenticated,/access/users/{id},PRD-UIX-006 INT-UIX-004
-GET,/style.css,G_UNAUTHENTICATED,unauthenticated,/style.css,PRD-UIX-006 INT-UIX-004
-POST,/mfa-enrol,G_UNAUTHENTICATED,unauthenticated,/mfa-enrol,SEC-SEC-003 PRD-IAM-002
-GET,/api/ui/projects,A_SCOPED_READ,ast.asset.read,projects,PRD-AST-001 PRD-AST-005 SEC-AUZ-016
-POST,/api/ui/ai-providers,E_CONFIGURATION,cfg.ai.manage,ai-providers,PRD-AIC-056 CFG-AIC-001 SEC-PTR-007 SEC-AUZ-017
-POST,/api/ui/roles/{id}/delete,E_CONFIGURATION,auz.role.manage,roles,PRD-AUZ-001 PRD-AUZ-002 PRD-AUZ-006
-GET,/api/ui/graph/{id},A_SCOPED_READ,ast.asset.read,graph,PRD-AST-001 PRD-AST-004 PRD-ORG-001 SEC-AUZ-016
-POST,/sign-out,G_UNAUTHENTICATED,unauthenticated,/sign-out,SEC-SEC-011 SEC-SEC-012
-POST,/api/v1/assets,B_SCOPED_WRITE,ast.asset.create,assets,PRD-AST-001 PRD-AST-008 SEC-AUZ-016
-PATCH,/api/v1/assets/{id},B_SCOPED_WRITE,ast.asset.update,assets,PRD-AST-001 PRD-AST-008 SEC-AUZ-016
-GET,/api/v1/assets,A_SCOPED_READ,ast.asset.read,assets,PRD-AST-001 PRD-AST-008 SEC-AUZ-016
-GET,/forgot-password,G_UNAUTHENTICATED,unauthenticated,/forgot-password,SEC-SEC-016
-GET,/requests/new,G_UNAUTHENTICATED,unauthenticated,/requests/new,PRD-UIX-006 INT-UIX-004
-GET,/applications/{id}/edit,G_UNAUTHENTICATED,unauthenticated,/applications/{id}/edit,PRD-AST-001 PRD-AST-008 SEC-AUZ-016 SEC-AUZ-017
-POST,/step-up,G_UNAUTHENTICATED,unauthenticated,/step-up,PRD-IAM-003 SEC-SEC-004
-GET,/pipeline,G_UNAUTHENTICATED,unauthenticated,/pipeline,PRD-UIX-006 INT-UIX-004
-POST,/api/v1/org-nodes,B_SCOPED_WRITE,org.node.create,org-nodes,PRD-ORG-001 SEC-AUZ-010 SEC-AUZ-016
-GET,/planning,G_UNAUTHENTICATED,unauthenticated,/planning,PRD-UIX-006 INT-UIX-004
-GET,/app/{a}/{b},G_UNAUTHENTICATED,unauthenticated,/app/{a}/{b},PRD-API-036 INT-UIX-003
-GET,/api/ui/session,A_SCOPED_READ,asm.request.read,session,PRD-PTR-021 PRD-ASM-003 SEC-AUZ-016
-GET,/api/ui/board,A_SCOPED_READ,asm.request.read,board,PRD-PTR-021 PRD-ASM-003 SEC-AUZ-016
 POST,/api/ui/organization/{id},E_CONFIGURATION,org.node.update,organization,PRD-ORG-001 PRD-ORG-003 PRD-ORG-006 SEC-AUZ-017
-POST,/api/ui/access/users/{id}/roles/revoke,E_CONFIGURATION,auz.role.manage,access,PRD-AUZ-001 SEC-AUZ-017
-POST,/api/ui/projects/{id}/access/revoke,E_CONFIGURATION,ast.asset.read,projects,PRD-AUZ-002 SEC-AUZ-014 SEC-AUZ-017
-POST,/api/ui/teams,E_CONFIGURATION,cap.team.manage,teams,PRD-CAP-001 PRD-CAP-013 PRD-AUZ-001
-GET,/api/ui/review-policy,A_SCOPED_READ,ast.asset.read,review-policy,PRD-ASM-002 CFG-ASM-001 SEC-AUZ-017
-POST,/api/ui/dependencies/artifact/{id}/retire,B_SCOPED_WRITE,ast.asset.update,dependencies,PRD-AST-001 PRD-SBM-056 SEC-AUZ-017
-POST,/api/ui/account/sessions/revoke,G_UNAUTHENTICATED,unauthenticated,account,SEC-SEC-012 SEC-SEC-016
-GET,/roles,G_UNAUTHENTICATED,unauthenticated,/roles,PRD-AUZ-001 SEC-SEC-004
-POST,/api/ui/roles/{id}/retire,E_CONFIGURATION,auz.role.manage,roles,PRD-AUZ-001 PRD-AUZ-002 PRD-AUZ-006
-GET,/change-password,G_UNAUTHENTICATED,unauthenticated,/change-password,PRD-IAM-007 SEC-SEC-006
-POST,/api/ui/service-credentials,E_CONFIGURATION,sbm.credential.manage,service-credentials,PRD-IAM-003 PRD-AUZ-002 SEC-SEC-004
-POST,/forgot-password,G_UNAUTHENTICATED,unauthenticated,/forgot-password,SEC-SEC-016
-GET,/settings,G_UNAUTHENTICATED,unauthenticated,/settings,PRD-UIX-006 INT-UIX-004
-GET,/api/v1/criticality-tiers,A_SCOPED_READ,org.nodetype.read,criticality-tiers,CFG-ORG-001 PRD-ORG-006
-POST,/api/ui/findings/classify,A_SCOPED_READ,vul.finding.triage,findings,PRD-VUL-015 PRD-AIC-056 SEC-AUZ-016
-GET,/api/ui/dependencies/tree,A_SCOPED_READ,sbm.coverage.read,dependencies,PRD-SBM-035 PRD-SBM-056 SEC-AUZ-016
-POST,/api/ui/settings/fields/{id}/lifecycle,E_CONFIGURATION,cfg.asset.field.manage,settings,PRD-AST-014 PRD-TEN-004 PRD-AUZ-006
-POST,/api/ui/requests,B_SCOPED_WRITE,asm.request.submit,requests,PRD-PTR-021 PRD-ASM-003 SEC-AUZ-017
-GET,/api/ui/board/{id}/finding-form,A_SCOPED_READ,vul.finding.triage,board,PRD-VUL-001 PRD-ASM-012 SEC-AUZ-017
-GET,/api/ui/access/users/{id},A_SCOPED_READ,iam.user.read,access,PRD-AUZ-001 SEC-AUZ-014
-GET,/applications,G_UNAUTHENTICATED,unauthenticated,/applications,PRD-AST-001 PRD-AST-008 SEC-AUZ-016 SEC-AUZ-017
-GET,/api/ui/dependencies/components,A_SCOPED_READ,sbm.coverage.read,dependencies,PRD-SBM-035 PRD-SBM-056 SEC-AUZ-016
-GET,/api/ui/teams,A_SCOPED_READ,cap.team.read,teams,PRD-CAP-001 PRD-CAP-013 PRD-AUZ-001
-GET,/api/ui/board/{id},A_SCOPED_READ,asm.request.read,board,PRD-PTR-021 PRD-ASM-003 SEC-AUZ-016
-GET,/step-up,G_UNAUTHENTICATED,unauthenticated,/step-up,PRD-IAM-003 SEC-SEC-004
-POST,/api/ui/board/{id}/assign,B_SCOPED_WRITE,asm.request.update,board,PRD-PTR-021 PRD-ASM-003 SEC-AUZ-016
-POST,/api/ui/settings/environments/{id}/move,E_CONFIGURATION,cfg.asset.field.manage,settings,CFG-AST-002 PRD-AST-004 PRD-TEN-004 PRD-AUZ-006
-GET,/projects/{id}/edit,G_UNAUTHENTICATED,unauthenticated,/projects/{id}/edit,PRD-UIX-006 INT-UIX-004
-GET,/api/ui/projects/{id}/requests,A_SCOPED_READ,asm.request.read,projects,PRD-PTR-021 PRD-ASM-003 SEC-AUZ-017
-POST,/change-password,G_UNAUTHENTICATED,unauthenticated,/change-password,PRD-IAM-007 SEC-SEC-006
-GET,/organization,G_UNAUTHENTICATED,unauthenticated,/organization,PRD-ORG-001 SEC-AUZ-010 SEC-AUZ-016
-PATCH,/api/v1/org-node-types/{id},E_CONFIGURATION,org.nodetype.manage,org-node-types,CFG-ORG-001 PRD-ORG-004
-GET,/api/ui/people,A_SCOPED_READ,asm.request.read,people,PRD-PTR-021 PRD-ASM-003 SEC-AUZ-016
-POST,/api/ui/settings/fields/{id}/move,E_CONFIGURATION,cfg.asset.field.manage,settings,PRD-AST-014 PRD-TEN-004 PRD-AUZ-006
-POST,/api/ui/access/users/{id}/roles,E_CONFIGURATION,auz.role.manage,access,PRD-AUZ-001 SEC-AUZ-017
-GET,/api/ui/applications/editor,A_SCOPED_READ,ast.asset.update,applications,PRD-AST-001 PRD-AST-008 SEC-AUZ-016
-GET,/board,G_UNAUTHENTICATED,unauthenticated,/board,PRD-ASM-003 PRD-PTR-021 SEC-AUZ-016
-GET,/applications/new,G_UNAUTHENTICATED,unauthenticated,/applications/new,PRD-AST-001 PRD-AST-008 SEC-AUZ-016 SEC-AUZ-017
-GET,/api/ui/vulnerabilities,A_SCOPED_READ,vul.finding.read,vulnerabilities,PRD-VUL-013 PRD-VUL-015 PRD-UIX-011 SEC-AUZ-016
-POST,/api/ui/applications/{id},B_SCOPED_WRITE,ast.asset.update,applications,PRD-AST-001 PRD-AST-008 SEC-AUZ-016
-GET,/api/v1/coverage-states,A_SCOPED_READ,sbm.coverage.read,coverage-states,PRD-SBM-056 PRD-SBM-032
-GET,/api/v1/findings,A_SCOPED_READ,vul.finding.read,findings,PRD-VUL-001 SEC-AUZ-016
-GET,/api/ui/applications/export,A_SCOPED_READ,ast.asset.read,applications,PRD-AST-001 PRD-API-046 SEC-AUZ-016
-GET,/api/ui/applications,A_SCOPED_READ,ast.asset.read,applications,PRD-AST-001 PRD-AST-008 SEC-AUZ-016
-GET,/board/{id},G_UNAUTHENTICATED,unauthenticated,/board/{id},PRD-ASM-003 PRD-PTR-021 SEC-AUZ-016
-POST,/sign-in,G_UNAUTHENTICATED,unauthenticated,/sign-in,SEC-SEC-005 SEC-SEC-013 SEC-TEN-004
-GET,/api/ui/findings/{id}/lifecycle,A_SCOPED_READ,vul.finding.read,findings,PRD-VUL-001 SEC-AUZ-016
-POST,/api/ui/suggestions/{id}/decide,B_SCOPED_WRITE,aic.suggestion.promote,suggestions,PRD-AIC-056 CFG-AIC-001 SEC-AUZ-017
-PATCH,/api/v1/asset-types/{id},E_CONFIGURATION,ast.assettype.manage,asset-types,PRD-AST-001 PRD-AST-002
+POST,/api/ui/agents/analyse,B_SCOPED_WRITE,aic.suggestion.promote,agents,PRD-AIC-056 CFG-AIC-001 SEC-AUZ-017
+GET,/ui/{a},G_UNAUTHENTICATED,unauthenticated,{a},PRD-API-036 INT-UIX-003
 GET,/api/ui/guide,G_UNAUTHENTICATED,unauthenticated,guide,PRD-PLT-007 INT-UIX-008
+GET,/api/ui/service-credentials,A_SCOPED_READ,sbm.credential.manage,service-credentials,PRD-IAM-003 PRD-AUZ-002 SEC-SEC-004
+GET,/api/ui/applications/export,A_SCOPED_READ,ast.asset.read,applications,PRD-AST-001 PRD-API-046 SEC-AUZ-016
 GET,/access,G_UNAUTHENTICATED,unauthenticated,/access,PRD-UIX-006 INT-UIX-004
+GET,/api/ui/board/{id},A_SCOPED_READ,asm.request.read,board,PRD-PTR-021 PRD-ASM-003 SEC-AUZ-016
+POST,/api/v1/session-reap,F_SERVICE_INGEST,iam.session.reap,session-reap,SEC-SEC-012 SEC-SEC-016 OPS-DEP-007
+GET,/mfa-enrol,G_UNAUTHENTICATED,unauthenticated,/mfa-enrol,SEC-SEC-003 PRD-IAM-002
+GET,/app/{a},G_UNAUTHENTICATED,unauthenticated,/app/{a},PRD-API-036 INT-UIX-003
 POST,/api/ui/board/{id}/findings,B_SCOPED_WRITE,vul.finding.triage,board,PRD-VUL-001 PRD-ASM-012 SEC-AUZ-017
-GET,/api/ui/projects/{id},A_SCOPED_READ,ast.asset.read,projects,PRD-AST-001 PRD-AST-005 SEC-AUZ-016
-GET,/api/ui/organization,A_SCOPED_READ,org.node.read,organization,PRD-ORG-001 SEC-AUZ-010 SEC-AUZ-016
-POST,/api/ui/applications/{id}/retire,B_SCOPED_WRITE,ast.asset.update,applications,PRD-AST-001 PRD-AST-012 SEC-AUZ-017
-PUT,/api/ui/review-policy/{id},E_CONFIGURATION,asm.policy.manage,review-policy,PRD-ASM-002 CFG-ASM-001 SEC-AUZ-017
-GET,/api/ui/sbom-submission-health,A_SCOPED_READ,sbm.coverage.read,sbom-submission-health,PRD-SBM-024 PRD-SBM-032
-POST,/api/ui/dependencies/artifact/{id}/sbom,B_SCOPED_WRITE,sbm.sbom.submit,dependencies,PRD-AST-001 PRD-SBM-056 SEC-AUZ-017
-GET,/api/ui/dependencies/locations,A_SCOPED_READ,sbm.coverage.read,dependencies,PRD-SBM-035 PRD-SBM-056 SEC-AUZ-016
-GET,/api/ui/projects/{id}/editor,A_SCOPED_READ,ast.asset.read,projects,PRD-AST-004 PRD-AST-014 PRD-AST-016 SEC-AUZ-017
-GET,/api/ui/assessment-plan,A_SCOPED_READ,ast.asset.read,assessment-plan,PRD-AST-001 PRD-ASM-003 PRD-CAP-005 PRD-UIX-011 SEC-AUZ-016
-POST,/api/ui/board/{id}/participants/remove,E_CONFIGURATION,asm.request.read,board,PRD-AUZ-002 SEC-AUZ-014 SEC-AUZ-017
-GET,/api/v1/org-node-types/{id},A_SCOPED_READ,org.nodetype.read,org-node-types,CFG-ORG-001 PRD-ORG-004
-GET,/api/v1/org-nodes,A_SCOPED_READ,org.node.read,org-nodes,PRD-ORG-001 SEC-AUZ-010 SEC-AUZ-016
-GET,/api/v1/requests,A_SCOPED_READ,asm.request.read,requests,PRD-PTR-021 PRD-ASM-003 SEC-AUZ-016
-GET,/api/ui/dependencies/graph,A_SCOPED_READ,sbm.coverage.read,dependencies,PRD-SBM-035 PRD-SBM-056 SEC-AUZ-016
-GET,/api/ui/settings/fields,A_SCOPED_READ,ast.asset.read,settings,PRD-AST-014 PRD-TEN-004 PRD-AUZ-006
-GET,/api/ui/board/{id}/findings/{findingId},A_SCOPED_READ,asm.request.read,board,PRD-ASM-007 PRD-ASM-012 PRD-VUL-001
-GET,/brand/logo.svg,G_UNAUTHENTICATED,unauthenticated,/brand/logo.svg,PRD-UIX-006 INT-UIX-004
-GET,/app/{a}/{b}/{c}/{d},G_UNAUTHENTICATED,unauthenticated,/app/{a}/{b}/{c}/{d},PRD-API-036 INT-UIX-003
-POST,/mfa,G_UNAUTHENTICATED,unauthenticated,/mfa,SEC-SEC-003 SEC-SEC-009
-GET,/api/ui/roles/{id},A_SCOPED_READ,auz.role.manage,roles,PRD-AUZ-001 PRD-AUZ-002 PRD-AUZ-006
-POST,/api/ui/roles/{id}/restore,E_CONFIGURATION,auz.role.manage,roles,PRD-AUZ-001 PRD-AUZ-002 PRD-AUZ-006
-POST,/board/{id}/attachments,B_SCOPED_WRITE,asm.request.read,/board/{id}/attachments,PRD-ASM-007 PRD-ASM-012 PRD-PTR-005
+GET,/guide,G_UNAUTHENTICATED,unauthenticated,/guide,PRD-PLT-007 INT-UIX-008
+POST,/forgot-password,G_UNAUTHENTICATED,unauthenticated,/forgot-password,SEC-SEC-016
+GET,/api/ui/overview,A_SCOPED_READ,vul.finding.read,overview,PRD-UIX-011 PRD-UIX-022 SEC-AUZ-016
+POST,/api/ui/access/users/{id}/reset,C_RESTRICTED_REVEAL,iam.credential.reset,access,PRD-IAM-007 SEC-SEC-016 SEC-AUZ-017
+GET,/access/users/{id},G_UNAUTHENTICATED,unauthenticated,/access/users/{id},PRD-UIX-006 INT-UIX-004
+GET,/api/ui/board/{id}/participants,A_SCOPED_READ,asm.request.read,board,PRD-AUZ-002 SEC-AUZ-014 SEC-AUZ-017
+GET,/api/ui/board/{id}/finding-form,A_SCOPED_READ,vul.finding.triage,board,PRD-VUL-001 PRD-ASM-012 SEC-AUZ-017
+POST,/api/ui/assessment-plan/attestations,B_SCOPED_WRITE,asm.review.attest,assessment-plan,PRD-ASM-019 PRD-ASM-020 PRD-ASM-021 SEC-AUZ-016
+GET,/api/v1/assets,A_SCOPED_READ,ast.asset.read,assets,PRD-AST-001 PRD-AST-008 SEC-AUZ-016
+POST,/mfa-enrol,G_UNAUTHENTICATED,unauthenticated,/mfa-enrol,SEC-SEC-003 PRD-IAM-002
+GET,/api/ui/review-policy,A_SCOPED_READ,ast.asset.read,review-policy,PRD-ASM-002 CFG-ASM-001 SEC-AUZ-017
 GET,/api/v1/findings/{id},A_SCOPED_READ,vul.finding.read,findings,PRD-VUL-001 SEC-AUZ-016
+GET,/api/ui/access,A_SCOPED_READ,iam.user.read,access,PRD-AUZ-001 SEC-AUZ-014
+POST,/api/v1/requests/{id}/transitions,B_SCOPED_WRITE,asm.request.update,requests,PRD-WRK-031 PRD-WRK-032 PRD-WRK-036
+GET,/api/ui/settings/environments,A_SCOPED_READ,ast.asset.read,settings,CFG-AST-002 PRD-AST-004 PRD-TEN-004 PRD-AUZ-006
+POST,/api/ui/teams/members,E_CONFIGURATION,cap.team.manage,teams,PRD-CAP-001 PRD-CAP-013 PRD-AUZ-001
+GET,/board/{id}/findings/{findingId},G_UNAUTHENTICATED,unauthenticated,/board/{id}/findings/{findingId},PRD-VUL-001 PRD-ASM-003 SEC-AUZ-017
+GET,/api-guide,G_UNAUTHENTICATED,unauthenticated,/api-guide,PRD-PLT-007 INT-UIX-008
+GET,/overview,G_UNAUTHENTICATED,unauthenticated,/overview,PRD-UIX-006 INT-UIX-004
+POST,/api/v1/rescans/{id},F_SERVICE_INGEST,sbm.scan.run,rescans,PRD-SBM-035 PRD-SBM-056 SEC-AUZ-016
+GET,/api/ui/people,A_SCOPED_READ,asm.request.read,people,PRD-PTR-021 PRD-ASM-003 SEC-AUZ-016
+POST,/mfa,G_UNAUTHENTICATED,unauthenticated,/mfa,SEC-SEC-003 SEC-SEC-009
+GET,/,G_UNAUTHENTICATED,unauthenticated,/,PRD-UIX-006 INT-UIX-004
+POST,/api/ui/board/{id}/transitions,B_SCOPED_WRITE,asm.request.update,board,PRD-PTR-021 PRD-ASM-003 SEC-AUZ-016
+GET,/applications/{id},G_UNAUTHENTICATED,unauthenticated,/applications/{id},PRD-AST-001 PRD-AST-008 SEC-AUZ-016 SEC-AUZ-017
+GET,/ui/{a}/{b},G_UNAUTHENTICATED,unauthenticated,{a},PRD-API-036 INT-UIX-003
+POST,/board/{id}/attachments,B_SCOPED_WRITE,asm.request.read,/board/{id}/attachments,PRD-ASM-007 PRD-ASM-012 PRD-PTR-005
+GET,/board/{id},G_UNAUTHENTICATED,unauthenticated,/board/{id},PRD-ASM-003 PRD-PTR-021 SEC-AUZ-016
+POST,/api/ui/applications/{id}/retire,B_SCOPED_WRITE,ast.asset.update,applications,PRD-AST-001 PRD-AST-012 SEC-AUZ-017
+GET,/api/ui/dependencies/tree,A_SCOPED_READ,sbm.coverage.read,dependencies,PRD-SBM-035 PRD-SBM-056 SEC-AUZ-016
+GET,/api/ui/workload,A_SCOPED_READ,cap.team.read,workload,PRD-CAP-005 PRD-CAP-008 PRD-CAP-013 PRD-CAP-014
+POST,/api/ui/service-credentials,E_CONFIGURATION,sbm.credential.manage,service-credentials,PRD-IAM-003 PRD-AUZ-002 SEC-SEC-004
+POST,/api/ui/alerts,E_CONFIGURATION,sbm.alert.manage,alerts,PRD-NTF-001 PRD-SBM-056 SEC-AUZ-016
+GET,/api/ui/ai-providers,A_SCOPED_READ,cfg.ai.manage,ai-providers,PRD-AIC-056 CFG-AIC-001 SEC-PTR-007 SEC-AUZ-017
+POST,/api/ui/dependencies/artifact/{id}/sbom,B_SCOPED_WRITE,sbm.sbom.submit,dependencies,PRD-AST-001 PRD-SBM-056 SEC-AUZ-017
+GET,/ui,G_UNAUTHENTICATED,unauthenticated,/ui,PRD-API-036 INT-UIX-003
+POST,/api/ui/ai-providers,E_CONFIGURATION,cfg.ai.manage,ai-providers,PRD-AIC-056 CFG-AIC-001 SEC-PTR-007 SEC-AUZ-017
+POST,/api/ui/applications,B_SCOPED_WRITE,ast.asset.create,applications,PRD-AST-001 PRD-AST-008 SEC-AUZ-016
+PATCH,/api/v1/asset-types/{id},E_CONFIGURATION,ast.assettype.manage,asset-types,PRD-AST-001 PRD-AST-002
+GET,/vulnerabilities,G_UNAUTHENTICATED,unauthenticated,/vulnerabilities,PRD-UIX-006 INT-UIX-004
+GET,/projects/{id}/edit,G_UNAUTHENTICATED,unauthenticated,/projects/{id}/edit,PRD-UIX-006 INT-UIX-004
+GET,/api/ui/vulnerabilities,A_SCOPED_READ,vul.finding.read,vulnerabilities,PRD-VUL-013 PRD-VUL-015 PRD-UIX-011 SEC-AUZ-016
+GET,/workload,G_UNAUTHENTICATED,unauthenticated,/workload,PRD-CAP-005 PRD-CAP-008 PRD-CAP-013 PRD-CAP-014
+POST,/api/ui/settings/fields/{id},E_CONFIGURATION,cfg.asset.field.manage,settings,PRD-AST-014 PRD-TEN-004 PRD-AUZ-006
+POST,/api/ui/assessment-plan/windows,B_SCOPED_WRITE,asm.request.schedule,assessment-plan,PRD-ASM-015 PRD-ASM-016 PRD-ASM-017 PRD-ASM-018 SEC-AUZ-016
+GET,/api/ui/projects/{id},A_SCOPED_READ,ast.asset.read,projects,PRD-AST-001 PRD-AST-005 SEC-AUZ-016
+POST,/api/ui/service-credentials/{id}/revoke,E_CONFIGURATION,sbm.credential.manage,service-credentials,PRD-IAM-003 PRD-AUZ-002 SEC-SEC-004
+GET,/applications,G_UNAUTHENTICATED,unauthenticated,/applications,PRD-AST-001 PRD-AST-008 SEC-AUZ-016 SEC-AUZ-017
+POST,/api/ui/board/{id}/participants/remove,E_CONFIGURATION,asm.request.read,board,PRD-AUZ-002 SEC-AUZ-014 SEC-AUZ-017
+GET,/account,G_UNAUTHENTICATED,unauthenticated,/account,SEC-SEC-012 PRD-IAM-007
+POST,/api/ui/board/{id}/participants,E_CONFIGURATION,asm.request.read,board,PRD-AUZ-002 SEC-AUZ-014 SEC-AUZ-017
+POST,/api/ui/projects/{id}/editor,B_SCOPED_WRITE,ast.asset.update,projects,PRD-AST-004 PRD-AST-014 PRD-AST-016 SEC-AUZ-017
+POST,/api/v1/org-node-types,E_CONFIGURATION,org.nodetype.manage,org-node-types,CFG-ORG-001 PRD-ORG-004
+GET,/step-up,G_UNAUTHENTICATED,unauthenticated,/step-up,PRD-IAM-003 SEC-SEC-004
+GET,/applications/new,G_UNAUTHENTICATED,unauthenticated,/applications/new,PRD-AST-001 PRD-AST-008 SEC-AUZ-016 SEC-AUZ-017
+GET,/api/ui/session,A_SCOPED_READ,asm.request.read,session,PRD-PTR-021 PRD-ASM-003 SEC-AUZ-016
+POST,/api/ui/findings/classify,A_SCOPED_READ,vul.finding.triage,findings,PRD-VUL-015 PRD-AIC-056 SEC-AUZ-016
 GET,/api/v1/asset-types/{id},A_SCOPED_READ,ast.assettype.read,asset-types,PRD-AST-001 PRD-AST-002
+GET,/api/ui/projects/{id}/editor,A_SCOPED_READ,ast.asset.read,projects,PRD-AST-004 PRD-AST-014 PRD-AST-016 SEC-AUZ-017
+GET,/api,G_UNAUTHENTICATED,unauthenticated,/api,PRD-API-036
+POST,/api/ui/access/users/{id}/roles,E_CONFIGURATION,auz.role.manage,access,PRD-AUZ-001 SEC-AUZ-017
+GET,/api/ui/workload/analytics,A_SCOPED_READ,cap.team.read,workload,PRD-CAP-005 PRD-CAP-008 PRD-CAP-013 PRD-CAP-014
+GET,/api/ui/alerts,A_SCOPED_READ,sbm.alert.manage,alerts,PRD-NTF-001 PRD-SBM-056 SEC-AUZ-016
+GET,/app,G_UNAUTHENTICATED,unauthenticated,/app,PRD-API-036 INT-UIX-003
+POST,/api/ui/projects/{id}/access,E_CONFIGURATION,ast.asset.read,projects,PRD-AUZ-002 SEC-AUZ-014 SEC-AUZ-017
+GET,/analytics,G_UNAUTHENTICATED,unauthenticated,/analytics,PRD-UIX-006 INT-UIX-004
+POST,/api/ui/board/{id}/findings/{findingId}/comments,B_SCOPED_WRITE,asm.request.read,board,PRD-ASM-007 PRD-ASM-012 PRD-VUL-001
+GET,/api/v1/assets/{id},A_SCOPED_READ,ast.asset.read,assets,PRD-AST-001 PRD-AST-008 SEC-AUZ-016
+GET,/api/v1/criticality-tiers,A_SCOPED_READ,org.nodetype.read,criticality-tiers,CFG-ORG-001 PRD-ORG-006
+POST,/api/ui/organization,E_CONFIGURATION,org.node.create,organization,PRD-ORG-001 SEC-AUZ-010 SEC-AUZ-016
+GET,/composition,G_UNAUTHENTICATED,unauthenticated,/composition,PRD-SBM-056 PRD-SBM-032
+GET,/api/ui/top-weaknesses,A_SCOPED_READ,vul.finding.read,top-weaknesses,PRD-VUL-013 PRD-UIX-011 SEC-AUZ-016
+GET,/api/ui/dependencies/components,A_SCOPED_READ,sbm.coverage.read,dependencies,PRD-SBM-035 PRD-SBM-056 SEC-AUZ-016
+POST,/api/ui/settings/fields/{id}/move,E_CONFIGURATION,cfg.asset.field.manage,settings,PRD-AST-014 PRD-TEN-004 PRD-AUZ-006
+POST,/api/ui/roles/{id}/delete,E_CONFIGURATION,auz.role.manage,roles,PRD-AUZ-001 PRD-AUZ-002 PRD-AUZ-006
+POST,/sign-in,G_UNAUTHENTICATED,unauthenticated,/sign-in,SEC-SEC-005 SEC-SEC-013 SEC-TEN-004
+GET,/api/ui/applications/{id}/posture,A_SCOPED_READ,ast.asset.read,applications,PRD-AST-001 PRD-UIX-011 PRD-UIX-022 SEC-AUZ-016
+GET,/api/ui/projects/{id}/access,A_SCOPED_READ,ast.asset.read,projects,PRD-AUZ-002 SEC-AUZ-014 SEC-AUZ-017
+GET,/api/ui/roles/{id},A_SCOPED_READ,auz.role.manage,roles,PRD-AUZ-001 PRD-AUZ-002 PRD-AUZ-006
+GET,/api/ui/board/{id}/comments,A_SCOPED_READ,asm.request.read,board,PRD-ASM-007 PRD-ASM-012 PRD-VUL-001
+POST,/api/ui/agents/{code}/run,B_SCOPED_WRITE,aic.capability.manage,agents,PRD-AIC-056 CFG-AIC-001 SEC-AUZ-017
+GET,/requests/new,G_UNAUTHENTICATED,unauthenticated,/requests/new,PRD-UIX-006 INT-UIX-004
+GET,/api/ui/dependencies/export,A_SCOPED_READ,sbm.coverage.read,dependencies,PRD-SBM-035 PRD-SBM-056 SEC-AUZ-016
+POST,/api/v1/criticality-tiers,E_CONFIGURATION,org.nodetype.manage,criticality-tiers,CFG-ORG-001 PRD-ORG-006
+POST,/api/ui/board/{id}/findings/{findingId},B_SCOPED_WRITE,vul.finding.triage,board,PRD-ASM-007 PRD-ASM-012 PRD-VUL-001
+GET,/api/v1/org-nodes/{id},A_SCOPED_READ,org.node.read,org-nodes,PRD-ORG-001 SEC-AUZ-010 SEC-AUZ-016
+POST,/api/ui/settings/fields,E_CONFIGURATION,cfg.asset.field.manage,settings,PRD-AST-014 PRD-TEN-004 PRD-AUZ-006
+POST,/api/ui/roles,E_CONFIGURATION,auz.role.manage,roles,PRD-AUZ-001 PRD-AUZ-002 PRD-AUZ-006
+POST,/api/ui/account/sessions/revoke,G_UNAUTHENTICATED,unauthenticated,account,SEC-SEC-012 SEC-SEC-016
+GET,/organization,G_UNAUTHENTICATED,unauthenticated,/organization,PRD-ORG-001 SEC-AUZ-010 SEC-AUZ-016
+POST,/api/ui/access/users/{id}/roles/revoke,E_CONFIGURATION,auz.role.manage,access,PRD-AUZ-001 SEC-AUZ-017
+GET,/api/ui/sbom-submission-health,A_SCOPED_READ,sbm.coverage.read,sbom-submission-health,PRD-SBM-024 PRD-SBM-032
+GET,/sign-out,G_UNAUTHENTICATED,unauthenticated,/sign-out,SEC-SEC-011 SEC-SEC-012
+GET,/settings,G_UNAUTHENTICATED,unauthenticated,/settings,PRD-UIX-006 INT-UIX-004
+GET,/api/ui/board/{id}/findings/{findingId},A_SCOPED_READ,asm.request.read,board,PRD-ASM-007 PRD-ASM-012 PRD-VUL-001
+GET,/api/ui/graph/{id},A_SCOPED_READ,ast.asset.read,graph,PRD-AST-001 PRD-AST-004 PRD-ORG-001 SEC-AUZ-016
+POST,/api/ui/board/{id}/assign,B_SCOPED_WRITE,asm.request.update,board,PRD-PTR-021 PRD-ASM-003 SEC-AUZ-016
 PATCH,/api/v1/org-nodes/{id},B_SCOPED_WRITE,org.node.update,org-nodes,PRD-ORG-001 SEC-AUZ-010 SEC-AUZ-016
+POST,/api/ui/projects/{id}/access/revoke,E_CONFIGURATION,ast.asset.read,projects,PRD-AUZ-002 SEC-AUZ-014 SEC-AUZ-017
+GET,/api/ui/projects,A_SCOPED_READ,ast.asset.read,projects,PRD-AST-001 PRD-AST-005 SEC-AUZ-016
+POST,/api/v1/sbom-submissions,F_SERVICE_INGEST,sbm.sbom.submit,sbom-submissions,PRD-API-038 PRD-API-039 PRD-SBM-037
+GET,/app/{a}/{b}/{c},G_UNAUTHENTICATED,unauthenticated,/app/{a}/{b}/{c},PRD-API-036 INT-UIX-003
+GET,/api/v1/requests/{id}/transitions,A_SCOPED_READ,asm.request.read,requests,PRD-WRK-031 PRD-WRK-032 PRD-WRK-036
+GET,/api/ui/applications,A_SCOPED_READ,ast.asset.read,applications,PRD-AST-001 PRD-AST-008 SEC-AUZ-016
+GET,/api/v1/findings,A_SCOPED_READ,vul.finding.read,findings,PRD-VUL-001 SEC-AUZ-016
+POST,/api/ui/suggestions/{id}/decide,B_SCOPED_WRITE,aic.suggestion.promote,suggestions,PRD-AIC-056 CFG-AIC-001 SEC-AUZ-017
+GET,/assets/{name},G_UNAUTHENTICATED,unauthenticated,/assets/{name},PRD-UIX-006 INT-UIX-004
+GET,/api/ui/projects/{id}/posture,A_SCOPED_READ,ast.asset.read,projects,PRD-AST-001 PRD-UIX-011 PRD-UIX-022 SEC-AUZ-016
+POST,/security-policy,E_CONFIGURATION,iam.user.manage,/security-policy,PRD-IAM-007 PRD-IAM-006 SEC-SEC-006
+GET,/api/v1/asset-types,A_SCOPED_READ,ast.assettype.read,asset-types,PRD-AST-001 PRD-AST-002
+GET,/api/ui/roles,A_SCOPED_READ,auz.role.manage,roles,PRD-AUZ-001 PRD-AUZ-002 PRD-AUZ-006
+GET,/roles/{id},G_UNAUTHENTICATED,unauthenticated,/roles/{id},PRD-AUZ-001 SEC-SEC-004
+GET,/mfa,G_UNAUTHENTICATED,unauthenticated,/mfa,SEC-SEC-003 SEC-SEC-009
+GET,/change-password,G_UNAUTHENTICATED,unauthenticated,/change-password,PRD-IAM-007 SEC-SEC-006
+GET,/api/ui/dependencies/locations,A_SCOPED_READ,sbm.coverage.read,dependencies,PRD-SBM-035 PRD-SBM-056 SEC-AUZ-016
+GET,/api/v1/org-node-types/{id},A_SCOPED_READ,org.nodetype.read,org-node-types,CFG-ORG-001 PRD-ORG-004
+GET,/api/ui/applications/editor,A_SCOPED_READ,ast.asset.update,applications,PRD-AST-001 PRD-AST-008 SEC-AUZ-016
+GET,/app.js,G_UNAUTHENTICATED,unauthenticated,/app.js,PRD-UIX-013 INT-UIX-003
+GET,/projects,G_UNAUTHENTICATED,unauthenticated,/projects,PRD-UIX-006 INT-UIX-004
+GET,/roles,G_UNAUTHENTICATED,unauthenticated,/roles,PRD-AUZ-001 SEC-SEC-004
+GET,/api/v1/org-node-types,A_SCOPED_READ,org.nodetype.read,org-node-types,CFG-ORG-001 PRD-ORG-004
+POST,/api/ui/settings/fields/{id}/lifecycle,E_CONFIGURATION,cfg.asset.field.manage,settings,PRD-AST-014 PRD-TEN-004 PRD-AUZ-006
+POST,/api/ui/roles/{id}/restore,E_CONFIGURATION,auz.role.manage,roles,PRD-AUZ-001 PRD-AUZ-002 PRD-AUZ-006
+PATCH,/api/v1/org-node-types/{id},E_CONFIGURATION,org.nodetype.manage,org-node-types,CFG-ORG-001 PRD-ORG-004
+GET,/api/ui/dependencies,A_SCOPED_READ,sbm.coverage.read,dependencies,PRD-SBM-035 PRD-SBM-056 SEC-AUZ-016
+GET,/brand/icon-180.png,G_UNAUTHENTICATED,unauthenticated,/brand/icon-180.png,PRD-UIX-006 INT-UIX-004
+POST,/step-up,G_UNAUTHENTICATED,unauthenticated,/step-up,PRD-IAM-003 SEC-SEC-004
+GET,/applications/{id}/edit,G_UNAUTHENTICATED,unauthenticated,/applications/{id}/edit,PRD-AST-001 PRD-AST-008 SEC-AUZ-016 SEC-AUZ-017
+GET,/api/ui/settings/fields,A_SCOPED_READ,ast.asset.read,settings,PRD-AST-014 PRD-TEN-004 PRD-AUZ-006
+POST,/api/ui/settings/environments/{id}/lifecycle,E_CONFIGURATION,cfg.asset.field.manage,settings,CFG-AST-002 PRD-AST-004 PRD-TEN-004 PRD-AUZ-006
+GET,/api/ui/board,A_SCOPED_READ,asm.request.read,board,PRD-PTR-021 PRD-ASM-003 SEC-AUZ-016
+GET,/app/{a}/{b},G_UNAUTHENTICATED,unauthenticated,/app/{a}/{b},PRD-API-036 INT-UIX-003
+GET,/pipeline,G_UNAUTHENTICATED,unauthenticated,/pipeline,PRD-UIX-006 INT-UIX-004
+PATCH,/api/v1/assets/{id},B_SCOPED_WRITE,ast.asset.update,assets,PRD-AST-001 PRD-AST-008 SEC-AUZ-016
+POST,/api/ui/organization/{id}/deprecate,E_CONFIGURATION,org.node.update,organization,PRD-ORG-001 PRD-ORG-003 PRD-ORG-006 SEC-AUZ-017
+POST,/api/ui/settings/environments,E_CONFIGURATION,cfg.asset.field.manage,settings,CFG-AST-002 PRD-AST-004 PRD-TEN-004 PRD-AUZ-006
+POST,/api/ui/settings/environments/{id}/move,E_CONFIGURATION,cfg.asset.field.manage,settings,CFG-AST-002 PRD-AST-004 PRD-TEN-004 PRD-AUZ-006
+GET,/ui/{a}/{b}/{c}/{d},G_UNAUTHENTICATED,unauthenticated,{a},PRD-API-036 INT-UIX-003
+GET,/board,G_UNAUTHENTICATED,unauthenticated,/board,PRD-ASM-003 PRD-PTR-021 SEC-AUZ-016
+POST,/api/ui/roles/{id}/retire,E_CONFIGURATION,auz.role.manage,roles,PRD-AUZ-001 PRD-AUZ-002 PRD-AUZ-006
+GET,/api/ui/suggestions,A_SCOPED_READ,aic.suggestion.read,suggestions,PRD-AIC-056 CFG-AIC-001 SEC-AUZ-017
+GET,/api/ui/account,G_UNAUTHENTICATED,unauthenticated,account,SEC-SEC-012 SEC-SEC-016
+GET,/api/v1/criticality-tiers/{id},A_SCOPED_READ,org.nodetype.read,criticality-tiers,CFG-ORG-001 PRD-ORG-006
+GET,/api/ui/projects/{id}/requests,A_SCOPED_READ,asm.request.read,projects,PRD-PTR-021 PRD-ASM-003 SEC-AUZ-017
+GET,/api/ui/organization,A_SCOPED_READ,org.node.read,organization,PRD-ORG-001 SEC-AUZ-010 SEC-AUZ-016
+GET,/brand/logo.svg,G_UNAUTHENTICATED,unauthenticated,/brand/logo.svg,PRD-UIX-006 INT-UIX-004
+GET,/api/v1/coverage-states,A_SCOPED_READ,sbm.coverage.read,coverage-states,PRD-SBM-056 PRD-SBM-032
+GET,/api/ui/applications/{id}/editor,A_SCOPED_READ,ast.asset.update,applications,PRD-AST-001 PRD-AST-008 SEC-AUZ-016
+GET,/api/ui/dependencies/graph,A_SCOPED_READ,sbm.coverage.read,dependencies,PRD-SBM-035 PRD-SBM-056 SEC-AUZ-016
+GET,/api/ui/vulnerabilities/export,A_SCOPED_READ,vul.finding.read,vulnerabilities,PRD-VUL-013 PRD-VUL-015 PRD-UIX-011 SEC-AUZ-016
+GET,/api/ui/dependencies/node,A_SCOPED_READ,sbm.coverage.read,dependencies,PRD-SBM-035 PRD-SBM-056 SEC-AUZ-016
+GET,/api/v1/rescans/pending,F_SERVICE_INGEST,sbm.scan.run,rescans,PRD-SBM-035 PRD-SBM-056 SEC-AUZ-016
+GET,/api/ui/dependencies/advisories,A_SCOPED_READ,sbm.coverage.read,dependencies,PRD-SBM-035 PRD-SBM-056 SEC-AUZ-016
+POST,/api/ui/rescan-schedule,E_CONFIGURATION,sbm.alert.manage,rescan-schedule,PRD-SBM-035 PRD-SBM-056 SEC-AUZ-016
+GET,/api/v1/requests/{id},A_SCOPED_READ,asm.request.read,requests,PRD-PTR-021 PRD-ASM-003 SEC-AUZ-016
+POST,/api/ui/roles/{id},E_CONFIGURATION,auz.role.manage,roles,PRD-AUZ-001 PRD-AUZ-002 PRD-AUZ-006
+GET,/forgot-password,G_UNAUTHENTICATED,unauthenticated,/forgot-password,SEC-SEC-016
+GET,/api/ui/access/users/{id},A_SCOPED_READ,iam.user.read,access,PRD-AUZ-001 SEC-AUZ-014
+GET,/api/ui/hosts,A_SCOPED_READ,ast.asset.read,hosts,PRD-AST-002 PRD-AST-004 SEC-AUZ-016
+GET,/planning,G_UNAUTHENTICATED,unauthenticated,/planning,PRD-UIX-006 INT-UIX-004
+PATCH,/api/v1/findings/{id},B_SCOPED_WRITE,vul.finding.triage,findings,PRD-VUL-001 SEC-AUZ-016
+GET,/api/v1/requests,A_SCOPED_READ,asm.request.read,requests,PRD-PTR-021 PRD-ASM-003 SEC-AUZ-016
+POST,/api/ui/requests,B_SCOPED_WRITE,asm.request.submit,requests,PRD-PTR-021 PRD-ASM-003 SEC-AUZ-017
+GET,/hosts,G_UNAUTHENTICATED,unauthenticated,/hosts,PRD-UIX-006 INT-UIX-004
+POST,/api/ui/teams,E_CONFIGURATION,cap.team.manage,teams,PRD-CAP-001 PRD-CAP-013 PRD-AUZ-001
+GET,/api/ui/findings/{id}/lifecycle,A_SCOPED_READ,vul.finding.read,findings,PRD-VUL-001 SEC-AUZ-016
+GET,/api/ui/session/keepalive,G_UNAUTHENTICATED,unauthenticated,session,SEC-SEC-010 SEC-SEC-011
+GET,/pipeline/findings/{id},G_UNAUTHENTICATED,unauthenticated,/pipeline/findings/{id},PRD-UIX-006 INT-UIX-004
+POST,/api/ui/dependencies/artifact/{id}/retire,B_SCOPED_WRITE,ast.asset.update,dependencies,PRD-AST-001 PRD-SBM-056 SEC-AUZ-017
+POST,/api/v1/finding-imports,F_SERVICE_INGEST,ing.findings.import,finding-imports,PRD-ING-024 PRD-ING-027 PRD-ING-040 PRD-ING-041
+GET,/attachments/{id},A_SCOPED_READ,asm.request.read,/attachments/{id},PRD-ASM-007 PRD-ASM-012 PRD-PTR-005
+GET,/sign-in,G_UNAUTHENTICATED,unauthenticated,/sign-in,SEC-SEC-005 SEC-SEC-013 SEC-TEN-004
+POST,/change-password,G_UNAUTHENTICATED,unauthenticated,/change-password,PRD-IAM-007 SEC-SEC-006
+GET,/ui/{a}/{b}/{c},G_UNAUTHENTICATED,unauthenticated,{a},PRD-API-036 INT-UIX-003
+POST,/api/ui/findings/{id}/transition,B_SCOPED_WRITE,vul.finding.read,findings,PRD-VUL-001 SEC-AUZ-016
+POST,/api/ui/assessment-plan/attestations/{id}/withdraw,B_SCOPED_WRITE,asm.review.attest,assessment-plan,PRD-ASM-019 PRD-ASM-020 PRD-ASM-021 SEC-AUZ-016
+GET,/api/ui/composition,A_SCOPED_READ,sbm.coverage.read,composition,PRD-SBM-056 PRD-SBM-032
+GET,/api/ui/applications/{id},A_SCOPED_READ,ast.asset.read,applications,PRD-AST-001 PRD-AST-008 SEC-AUZ-016
+GET,/projects/{id},G_UNAUTHENTICATED,unauthenticated,/projects/{id},PRD-UIX-006 INT-UIX-004
+POST,/api/v1/org-nodes,B_SCOPED_WRITE,org.node.create,org-nodes,PRD-ORG-001 SEC-AUZ-010 SEC-AUZ-016
+GET,/app/{a}/{b}/{c}/{d},G_UNAUTHENTICATED,unauthenticated,/app/{a}/{b}/{c}/{d},PRD-API-036 INT-UIX-003
+GET,/api/v1/org-nodes,A_SCOPED_READ,org.node.read,org-nodes,PRD-ORG-001 SEC-AUZ-010 SEC-AUZ-016
+POST,/api/ui/ai-providers/{id}/active,E_CONFIGURATION,cfg.ai.manage,ai-providers,PRD-AIC-056 CFG-AIC-001 SEC-PTR-007 SEC-AUZ-017
+POST,/api/ui/applications/{id},B_SCOPED_WRITE,ast.asset.update,applications,PRD-AST-001 PRD-AST-008 SEC-AUZ-016
+POST,/api/v1/assets,B_SCOPED_WRITE,ast.asset.create,assets,PRD-AST-001 PRD-AST-008 SEC-AUZ-016
+POST,/api/ui/settings/environments/{id},E_CONFIGURATION,cfg.asset.field.manage,settings,CFG-AST-002 PRD-AST-004 PRD-TEN-004 PRD-AUZ-006
+GET,/api/ui/rescan-schedule,A_SCOPED_READ,sbm.alert.manage,rescan-schedule,PRD-SBM-035 PRD-SBM-056 SEC-AUZ-016
+GET,/api/ui/teams,A_SCOPED_READ,cap.team.read,teams,PRD-CAP-001 PRD-CAP-013 PRD-AUZ-001
+PATCH,/api/v1/criticality-tiers/{id},E_CONFIGURATION,org.nodetype.manage,criticality-tiers,CFG-ORG-001 PRD-ORG-006
+POST,/api/v1/asset-types,E_CONFIGURATION,ast.assettype.manage,asset-types,PRD-AST-001 PRD-AST-002
+POST,/api/ui/board/{id}/findings/{findingId}/remediation,B_SCOPED_WRITE,asm.request.read,board,PRD-VUL-001 PRD-WRK-032 SEC-AUZ-017
+POST,/api/ui/board/{id}/comments,B_SCOPED_WRITE,asm.request.read,board,PRD-ASM-007 PRD-ASM-012 PRD-VUL-001
+PATCH,/api/ui/assessment-plan/windows/{id},B_SCOPED_WRITE,asm.request.schedule,assessment-plan,PRD-ASM-015 PRD-ASM-016 PRD-ASM-017 PRD-ASM-018 SEC-AUZ-016
+GET,/api/ui/assessment-plan,A_SCOPED_READ,ast.asset.read,assessment-plan,PRD-AST-001 PRD-ASM-003 PRD-ASM-023 PRD-ASM-024 PRD-ASM-025 PRD-CAP-005 PRD-UIX-011 SEC-AUZ-016
+GET,/style.css,G_UNAUTHENTICATED,unauthenticated,/style.css,PRD-UIX-006 INT-UIX-004
+PUT,/api/ui/review-policy/{id},E_CONFIGURATION,asm.policy.manage,review-policy,PRD-ASM-002 CFG-ASM-001 SEC-AUZ-017
+POST,/sign-out,G_UNAUTHENTICATED,unauthenticated,/sign-out,SEC-SEC-011 SEC-SEC-012
+GET,/security-policy,A_SCOPED_READ,iam.user.manage,/security-policy,PRD-IAM-007 PRD-IAM-006 SEC-SEC-006
+POST,/api/ui/teams/{id}/retire,E_CONFIGURATION,cap.team.manage,teams,PRD-CAP-001 PRD-CAP-013 PRD-AUZ-001
+GET,/api/ui/api-guide,G_UNAUTHENTICATED,unauthenticated,api-guide,PRD-PLT-007 INT-UIX-008
+POST,/api/ui/alerts/{id}/active,E_CONFIGURATION,sbm.alert.manage,alerts,PRD-NTF-001 PRD-SBM-056 SEC-AUZ-016

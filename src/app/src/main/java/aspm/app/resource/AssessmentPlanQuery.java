@@ -59,7 +59,13 @@ public final class AssessmentPlanQuery {
     public record PlanRow(String assetId, String name, String orgPath, String criticality,
             long completed, long inFlight, long abandoned, String lastReviewAt, Integer intervalMonths,
             String nextDueAt, String status, long openRequests, long severeOpen,
-            String exposureDeclared, Integer apiCount, long projectCount, long plannedWindows) {
+            String exposureDeclared, Integer apiCount, long projectCount, long plannedWindows,
+            /**
+             * How the platform knows about the last review: {@code OBSERVED}, {@code ATTESTED}, or
+             * null where there has been none. Never inferred from whether a count is zero — an
+             * application can carry observed reviews AND a later attested one.
+             */
+            long attestedCount, String lastReviewSource) {
     }
 
     /** One bar: a request that happened, or the projection of one that is owed. */
@@ -264,7 +270,8 @@ public final class AssessmentPlanQuery {
                        -- can be retyped from TEXT to INTEGER after values exist, which leaves a cast
                        -- that fails the whole page rather than one cell.
                        sz.api_count, coalesce(sz.project_count, 0),
-                       coalesce(pw.planned, 0)
+                       coalesce(pw.planned, 0),
+                       coalesce(c.attested_review_count, 0), c.last_full_review_source
                   FROM asset a
                   JOIN asset_type t ON t.id = a.type_id AND t.code = 'APPLICATION'
                   LEFT JOIN application_review_cadence c ON c.asset_id = a.id
@@ -285,7 +292,7 @@ public final class AssessmentPlanQuery {
                   LEFT JOIN LATERAL (
                       SELECT count(*) AS planned
                         FROM assessment_plan_window w
-                       WHERE w.state = 'PLANNED'
+                       WHERE w.state = 'PLANNED' AND""" + " " + PlanWindows.IN_PLAN_HORIZON + """
                          AND (w.target_asset_id = a.id
                               OR w.target_asset_id IN (SELECT cc.asset_id FROM asset_composition cc
                                                         WHERE cc.root_id = a.id))
@@ -304,7 +311,7 @@ public final class AssessmentPlanQuery {
                 r.getString(10), r.getString(11), r.getLong(12), r.getLong(13),
                 r.getString(14),
                 r.getObject(15) == null ? null : Integer.valueOf(r.getInt(15)),
-                r.getLong(16), r.getLong(17)));
+                r.getLong(16), r.getLong(17), r.getLong(18), r.getString(19)));
     }
 
     /**
@@ -457,7 +464,9 @@ public final class AssessmentPlanQuery {
                        pr.attributes ->> 'access_path',
                        pr.lifecycle_state,
                        (SELECT count(*) FROM assessment_plan_window w
-                         WHERE w.target_asset_id = pr.id AND w.state = 'PLANNED')
+                         WHERE w.target_asset_id = pr.id AND w.state = 'PLANNED'
+                           AND""" + " " + PlanWindows.IN_PLAN_HORIZON + """
+                       )
                   FROM asset app
                   JOIN asset_type at ON at.id = app.type_id AND at.code = 'APPLICATION'
                   JOIN asset_composition cc ON cc.root_id = app.id
@@ -471,6 +480,175 @@ public final class AssessmentPlanQuery {
                 r -> new ProjectRef(r.getString(1), r.getString(2), r.getString(3),
                         r.getObject(4) == null ? null : Integer.valueOf(r.getInt(4)),
                         r.getString(5), r.getString(6), r.getLong(7)));
+    }
+
+    /**
+     * One application's contribution to the coverage figures, for one year.
+     *
+     * <p>Deliberately per-application and not pre-aggregated. The grouping — by organization, by
+     * criticality tier, by how many times it was reviewed — happens in Java, where it can be read and
+     * tested, and where the same rows produce every table on the screen. Five aggregate queries over
+     * the same population is five chances for one of them to apply a different scope predicate and
+     * report a total that does not match the rows beneath it.
+     *
+     * <p>{@code tierCode} and {@code tierOrdinal} come from {@code criticality_tier}, which is tenant
+     * data (ADR-027). There is no CRITICAL/HIGH/MEDIUM here and there must not be: the tiers are
+     * whatever the tenant named them, and their order is the tenant's {@code ordinal}. A null tier is
+     * its own group, because an application nobody classified is not a low-criticality application.
+     *
+     * <p>{@code reviewsObserved} and {@code reviewsAttested} are separate for the reason
+     * {@code PRD-ASM-020} gives: a frequency table IS a coverage figure derived from review counts, so
+     * it has to be able to say how much of it rests on assertion.
+     */
+    public record CoverageRow(String assetId, String orgId, String orgName,
+            String tierCode, String tierLabel, Integer tierOrdinal,
+            long reviewsObserved, long reviewsAttested,
+            long planned, long cancelled, long converted, long done, long missed) {
+
+        /** Reviews of either kind. What "assessed N times this year" means to a reader. */
+        public long reviews() {
+            return reviewsObserved + reviewsAttested;
+        }
+    }
+
+    /**
+     * The tenant's active criticality tiers, in the tenant's own order.
+     *
+     * <p>Read from the catalogue and NOT derived from the applications observed, which is how it was
+     * first written and was wrong: a tier nobody has classified anything into disappeared from the
+     * table entirely, so a reader could not tell "no application is Tier 3" from "there is no Tier 3".
+     * The second is a configuration fact and the first is a finding about the estate. A column of
+     * zeroes states the finding; a missing column hides it, and changes the shape of the table as the
+     * data moves.
+     */
+    public List<PlanStatistics.Tier> tiers(Principal principal) throws SQLException {
+        List<PlanStatistics.Tier> tiers = new ArrayList<>();
+        try (Connection connection = open(principal);
+                PreparedStatement statement = connection.prepareStatement("""
+                        SELECT code, label_i18n ->> 'en', ordinal
+                          FROM criticality_tier
+                         WHERE lifecycle_state = 'ACTIVE'
+                         ORDER BY ordinal, code
+                        """);
+                ResultSet r = statement.executeQuery()) {
+            while (r.next()) {
+                tiers.add(new PlanStatistics.Tier(r.getString(1),
+                        r.getString(2) == null ? r.getString(1) : r.getString(2), r.getInt(3)));
+            }
+        }
+        return tiers;
+    }
+
+    /**
+     * Coverage and plan progress, one row per application, for a single calendar year.
+     *
+     * <p>The year is a calendar year and not a rolling twelve months. A planning cycle is annual and
+     * budgeted annually, so "twice this year" is the question people actually ask; a rolling window
+     * would make the same application move between buckets on a day nobody changed anything.
+     *
+     * <p><b>Parameter order is explicit here rather than going through {@code read}.</b> That helper
+     * binds the scope array at position one, and this query's first placeholders are dates inside
+     * lateral joins that appear earlier in the text. Reusing it would have bound a date where an array
+     * was expected — which is the failure the {@code Binder} exists to prevent when clauses are
+     * assembled conditionally, and this query assembles none.
+     */
+    public List<CoverageRow> coverage(Principal principal, Filter filter, int year)
+            throws SQLException {
+        Set<UUID> scope = principal == null ? Set.of() : principal.scopeNodeIds();
+        if (scope.isEmpty()) {
+            return List.of();
+        }
+        java.time.LocalDate from = java.time.LocalDate.of(year, 1, 1);
+        java.time.LocalDate until = from.plusYears(1);
+        Binder binder = new Binder();
+        String orgClause = orgClause("a.owning_node_id", filter, binder);
+        String sql = """
+                SELECT a.id::text, root.id::text, root.name,
+                       ct.code, ct.label_i18n ->> 'en', ct.ordinal,
+                       coalesce(obs.n, 0), coalesce(att.n, 0),
+                       coalesce(pw.planned, 0), coalesce(pw.cancelled, 0),
+                       coalesce(pw.converted, 0), coalesce(pw.done, 0), coalesce(pw.missed, 0)
+                  FROM asset a
+                  JOIN asset_type t ON t.id = a.type_id AND t.code = 'APPLICATION'
+                  LEFT JOIN org_node n ON n.id = a.owning_node_id
+                  -- The organization at the top of this application's branch.
+                  --
+                  -- A LATERAL and not two joins. Joining org_closure directly yields one row per
+                  -- ANCESTOR — three for an application three levels down — and putting
+                  -- `parent_id IS NULL` on the org_node join does not remove them, because a LEFT
+                  -- JOIN keeps the unmatched closure rows with a null root beside them. Measured:
+                  -- eleven applications came back as twenty-eight rows, every visible one with an
+                  -- empty organization, and every per-organization total would have been inflated by
+                  -- the depth of the tree.
+                  LEFT JOIN LATERAL (
+                      SELECT rn.id, rn.name
+                        FROM org_closure cl
+                        JOIN org_node rn ON rn.id = cl.ancestor_id AND rn.parent_id IS NULL
+                       WHERE cl.descendant_id = a.owning_node_id
+                       LIMIT 1
+                  ) root ON true
+                  -- The tier the application actually carries, inherited from its node where it has
+                  -- none of its own — the same resolution application_review_cadence uses, so the
+                  -- two cannot disagree about which tier an application is in.
+                  LEFT JOIN criticality_tier ct
+                         ON ct.id = coalesce(a.criticality_tier_id, n.criticality_tier_id)
+                  LEFT JOIN LATERAL (
+                      SELECT count(*) AS n FROM application_full_review fr
+                       WHERE fr.asset_id = a.id AND fr.closed_at IS NOT NULL
+                         AND fr.closed_at >= ? AND fr.closed_at < ?
+                  ) obs ON true
+                  LEFT JOIN LATERAL (
+                      SELECT count(*) AS n FROM application_review_attestation at
+                       WHERE at.asset_id = a.id AND at.withdrawn_at IS NULL
+                         AND at.performed_to >= ? AND at.performed_to < ?
+                  ) att ON true
+                  -- The plan for this application AND for its projects: a window on a project is part
+                  -- of the application's plan, which is how the Planned column on the table already
+                  -- counts it. Two definitions of "planned" on one screen is the defect this avoids.
+                  LEFT JOIN LATERAL (
+                      SELECT count(*) FILTER (WHERE w.state <> 'CANCELLED')        AS planned,
+                             count(*) FILTER (WHERE w.state = 'CANCELLED')         AS cancelled,
+                             count(*) FILTER (WHERE w.state = 'CONVERTED')         AS converted,
+                             count(*) FILTER (WHERE w.state = 'CONVERTED'
+                                              AND rcs.disposition = 'COMPLETED')   AS done,
+                             -- The planning finding: the fortnight passed and nothing was raised.
+                             count(*) FILTER (WHERE w.state = 'PLANNED'
+                                              AND w.ends_on < current_date)        AS missed
+                        FROM assessment_plan_window w
+                        LEFT JOIN assessment_request r ON r.id = w.request_id
+                        LEFT JOIN review_completion_state rcs
+                               ON rcs.state_code = r.state AND rcs.tenant_id = r.tenant_id
+                       WHERE (w.target_asset_id = a.id
+                              OR w.target_asset_id IN (SELECT cc.asset_id FROM asset_composition cc
+                                                        WHERE cc.root_id = a.id))
+                         AND w.starts_on >= ? AND w.starts_on < ?
+                  ) pw ON true
+                 WHERE a.lifecycle_state <> 'RETIRED' AND %s%s
+                 ORDER BY root.name, a.display_name
+                """.formatted(inScope("a.owning_node_id"), orgClause);
+
+        List<CoverageRow> rows = new ArrayList<>();
+        try (Connection connection = open(principal);
+                PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setObject(1, from);
+            statement.setObject(2, until);
+            statement.setObject(3, from);
+            statement.setObject(4, until);
+            statement.setObject(5, from);
+            statement.setObject(6, until);
+            statement.setArray(7, connection.createArrayOf("uuid", scope.toArray(new UUID[0])));
+            binder.bind(connection, statement, 8);
+            try (ResultSet r = statement.executeQuery()) {
+                while (r.next()) {
+                    rows.add(new CoverageRow(r.getString(1), r.getString(2), r.getString(3),
+                            r.getString(4), r.getString(5),
+                            r.getObject(6) == null ? null : Integer.valueOf(r.getInt(6)),
+                            r.getLong(7), r.getLong(8), r.getLong(9), r.getLong(10),
+                            r.getLong(11), r.getLong(12), r.getLong(13)));
+                }
+            }
+        }
+        return rows;
     }
 
     /** One selectable filter option, with how much work sits behind it. */

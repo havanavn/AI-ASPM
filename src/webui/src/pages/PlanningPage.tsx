@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
-  CalendarClock, CalendarPlus, ChevronDown, ChevronRight, Search, Trash2, X,
+  CalendarClock, CalendarPlus, ChevronDown, ChevronRight, History, Search, Trash2, X,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -18,12 +18,16 @@ import { Label } from "@/components/ui/label";
 import { MultiSelect } from "@/components/MultiSelect";
 import { Checkbox } from "@/components/ui/checkbox";
 import { PlanWindowDialog, type PlanTarget } from "@/components/PlanWindowDialog";
+import { AttestReviewDialog, type Attestation } from "@/components/AttestReviewDialog";
+import { CoverageTables, type CoverageReport } from "@/components/CoverageTables";
 
 interface PlanRow {
   assetId: string; name: string; orgPath: string | null; criticality: string | null;
   completed: number; inFlight: number; abandoned: number;
   lastReviewAt: string | null; intervalMonths: number | null; nextDueAt: string | null;
   status: string; openRequests: number; severeOpen: number;
+  /** How the platform knows about the last review: OBSERVED, ATTESTED, or null for none. */
+  attestedCount: number; lastReviewSource: string | null;
   /** What the engagement is sized from. `apiCount` is null, never 0, where nothing declared one. */
   exposureDeclared: string | null; apiCount: number | null;
   projectCount: number; plannedWindows: number;
@@ -60,6 +64,9 @@ interface Payload {
   mayManagePolicy: boolean;
   maySchedule: boolean;
   mayPlan: boolean;
+  attestations: Attestation[];
+  mayAttest: boolean;
+  statistics: CoverageReport;
 }
 
 /**
@@ -305,6 +312,12 @@ export function PlanningPage() {
   const windowsByTarget = useMemo(() => {
     const map: Record<string, PlanWindow[]> = {};
     for (const w of data?.windows ?? []) (map[w.targetAssetId] ??= []).push(w);
+    return map;
+  }, [data]);
+
+  const attestationsByApp = useMemo(() => {
+    const map: Record<string, Attestation[]> = {};
+    for (const a of data?.attestations ?? []) (map[a.assetId] ??= []).push(a);
     return map;
   }, [data]);
 
@@ -656,6 +669,11 @@ export function PlanningPage() {
                   id: r.assetId, name: r.name, typeCode: "APPLICATION",
                   intervalMonths: r.intervalMonths, plannedWindows: r.plannedWindows,
                 }))}
+                existing={visibleTicked.flatMap((r) =>
+                  (windowsByTarget[r.assetId] ?? []).concat(
+                    (projectsByApp[r.assetId] ?? [])
+                      .flatMap((pr) => windowsByTarget[pr.projectId] ?? [])))}
+                onCancelWindow={cancelWindow}
                 onSaved={() => { setTicked(new Set()); setReloads((n) => n + 1); }}
                 trigger={
                   <Button size="sm" variant="secondary" disabled={visibleTicked.length === 0}
@@ -786,6 +804,12 @@ export function PlanningPage() {
                           ? "No criticality set"
                           : status.label}
                       </Badge>
+                      {/* PRD-ASM-020: a status derived from somebody's word says so, wherever it is
+                          shown. Without this the badge would present an assertion and a review the
+                          platform holds the evidence for as the same claim. */}
+                      {row.lastReviewSource === "ATTESTED" && (
+                        <Badge tone="unknown">asserted, not observed</Badge>
+                      )}
                       {row.status === "NO_OBLIGATION" && !row.criticality && (
                         <div className="mt-0.5 text-[10px] text-tone-warn">
                           No tier, so no review interval can apply. Set its criticality on the
@@ -802,6 +826,9 @@ export function PlanningPage() {
                     </TableCell>
                     <TableCell className="tabular">
                       {row.lastReviewAt ?? <span className="italic text-tone-unknown">never</span>}
+                      {row.lastReviewSource === "ATTESTED" && (
+                        <div className="text-[10px] text-muted-foreground">asserted</div>
+                      )}
                     </TableCell>
                     <TableCell className="tabular">
                       {row.intervalMonths ? `${row.intervalMonths} months`
@@ -830,10 +857,27 @@ export function PlanningPage() {
                               targets={[{ id: row.assetId, name: row.name, typeCode: "APPLICATION",
                                           intervalMonths: row.intervalMonths,
                                           plannedWindows: row.plannedWindows }]}
+                              // The application's own windows AND its projects', because the count on
+                              // this row includes both and the dialog must not disagree with the
+                              // number on the button that opened it.
+                              existing={windows}
+                              onCancelWindow={cancelWindow}
                               onSaved={() => setReloads((n) => n + 1)}
                               trigger={
                                 <Button size="sm" variant="ghost" title="Plan windows for the year">
                                   <CalendarPlus className="size-3.5" /> Plan
+                                </Button>
+                              } />
+                          )}
+                          {data.mayAttest && (
+                            <AttestReviewDialog
+                              assetId={row.assetId} assetName={row.name}
+                              existing={attestationsByApp[row.assetId] ?? []}
+                              onSaved={() => setReloads((n) => n + 1)}
+                              trigger={
+                                <Button size="sm" variant="ghost"
+                                        title="Record a review already carried out, from before this platform held it">
+                                  <History className="size-3.5" />
                                 </Button>
                               } />
                           )}
@@ -907,6 +951,8 @@ export function PlanningPage() {
                                                       typeCode: "PROJECT",
                                                       intervalMonths: row.intervalMonths,
                                                       plannedWindows: pr.plannedWindows }]}
+                                          existing={windowsByTarget[pr.projectId] ?? []}
+                                          onCancelWindow={cancelWindow}
                                           onSaved={() => setReloads((n) => n + 1)}
                                           trigger={
                                             <Button size="sm" variant="ghost"
@@ -922,6 +968,41 @@ export function PlanningPage() {
                               </tbody>
                             </table>
                           </div>
+
+                          {(attestationsByApp[row.assetId] ?? []).length > 0 && (
+                            <div>
+                              <div className="text-[11px] font-medium uppercase tracking-wide
+                                              text-muted-foreground">
+                                Reviews asserted, not observed
+                              </div>
+                              <ul className="mt-1 flex flex-col gap-1">
+                                {(attestationsByApp[row.assetId] ?? []).map((at) => (
+                                  <li key={at.id} className="flex items-center gap-2 text-xs">
+                                    <span className="tabular">
+                                      {at.performedFrom} → {at.performedTo}
+                                    </span>
+                                    {at.performedBy && (
+                                      <span className="text-muted-foreground">{at.performedBy}</span>
+                                    )}
+                                    {at.evidenceRef
+                                      ? <Badge tone="ok">report: {at.evidenceRef}</Badge>
+                                      : <Badge tone="unknown">no evidence</Badge>}
+                                    {at.withdrawnAt && (
+                                      <Badge tone="neutral">
+                                        withdrawn — {at.withdrawalReason}
+                                      </Badge>
+                                    )}
+                                    {at.attestedByName && (
+                                      <span className="text-[10px] text-muted-foreground">
+                                        asserted by {at.attestedByName}
+                                        {at.attestedAt ? ` on ${at.attestedAt}` : ""}
+                                      </span>
+                                    )}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
 
                           {/* The plan itself, so it can be read and undone where it was made. */}
                           <div>
@@ -987,6 +1068,19 @@ export function PlanningPage() {
       {/* Last, deliberately. The plan is the thing somebody came here to read; the interval is what
           it is computed from, and putting configuration first would make a reader work through a
           settings form before seeing whether anything was wrong. Changing it refetches the plan. */}
+      {/* Before the interval configuration and after the table: the figures are what somebody came
+          here to read, and the interval is what they are computed from. */}
+      {data.statistics && (
+        <CoverageTables
+          report={data.statistics}
+          year={data.statistics.year}
+          onYear={(next) => {
+            const params2 = new URLSearchParams(params);
+            params2.set("year", String(next));
+            setParams(params2, { replace: true });
+          }} />
+      )}
+
       <ReviewPolicy onChanged={() => setReloads((n) => n + 1)} />
     </div>
   );
