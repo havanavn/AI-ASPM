@@ -65,7 +65,9 @@ public final class AssessmentPlanQuery {
              * null where there has been none. Never inferred from whether a count is zero — an
              * application can carry observed reviews AND a later attested one.
              */
-            long attestedCount, String lastReviewSource) {
+            long attestedCount, String lastReviewSource,
+            /** The business unit the application belongs to: the ancestor one level below the root, or the node itself at the root. */
+            String businessUnitId, String businessUnitName) {
     }
 
     /** One bar: a request that happened, or the projection of one that is owed. */
@@ -182,10 +184,33 @@ public final class AssessmentPlanQuery {
         if (!filter.anyRequestFilter()) {
             return "";
         }
-        return " AND EXISTS (SELECT 1 FROM application_request fr"
+        // A team or a person "has work on" an application in two ways: a request they lead or take
+        // part in, and a window planned for them (V080). Both count, or the overview's "planned for
+        // team X" row would name applications the team filter then hides.
+        return " AND (EXISTS (SELECT 1 FROM application_request fr"
                 + " JOIN request_board fb ON fb.id = fr.request_id"
                 + " WHERE fr.asset_id = " + assetColumn
-                + " AND " + participantPredicate("fb", filter, binder) + ")";
+                + " AND " + participantPredicate("fb", filter, binder) + ")"
+                + plannedPredicate(assetColumn, filter, binder) + ")";
+    }
+
+    private static String plannedPredicate(String assetColumn, Filter filter, Binder binder) {
+        List<String> any = new ArrayList<>();
+        if (filter.teams() != null && !filter.teams().isEmpty()) {
+            binder.add(filter.teams());
+            any.add("w.team_id = ANY (?)");
+        }
+        if (filter.assessors() != null && !filter.assessors().isEmpty()) {
+            binder.add(filter.assessors());
+            any.add("w.assessor_principal_id = ANY (?)");
+        }
+        if (any.isEmpty()) {
+            return "";
+        }
+        return " OR EXISTS (SELECT 1 FROM assessment_plan_window w WHERE w.state = 'PLANNED'"
+                + " AND (w.target_asset_id = " + assetColumn
+                + " OR w.target_asset_id IN (SELECT cc.asset_id FROM asset_composition cc WHERE cc.root_id = " + assetColumn + "))"
+                + " AND (" + String.join(" OR ", any) + "))";
     }
 
     /**
@@ -271,8 +296,27 @@ public final class AssessmentPlanQuery {
                        -- that fails the whole page rather than one cell.
                        sz.api_count, coalesce(sz.project_count, 0),
                        coalesce(pw.planned, 0),
-                       coalesce(c.attested_review_count, 0), c.last_full_review_source
+                       coalesce(c.attested_review_count, 0), c.last_full_review_source,
+                       -- The business unit: the ancestor one level below the root, or the node itself
+                       -- when the application sits directly under a root. The overview groups by it, and
+                       -- the group has to be the level a tenant runs its planning at rather than the leaf.
+                       bu.id::text, bu.name
                   FROM asset a
+                  LEFT JOIN LATERAL (
+                      -- The "business unit" is a structural choice, not a configured level name
+                      -- (ADR-027): in a tree with one root it is the ancestor directly below the
+                      -- root, in a forest — a tenant whose top-level nodes are its units — it is the
+                      -- root itself. An application owned at the root falls back to the root.
+                      SELECT an.id, an.name
+                        FROM org_closure cl JOIN org_node an ON an.id = cl.ancestor_id
+                       WHERE cl.descendant_id = a.owning_node_id
+                       ORDER BY CASE WHEN an.parent_id IS NULL
+                                     AND (SELECT count(*) FROM org_node r
+                                           WHERE r.tenant_id = a.tenant_id AND r.parent_id IS NULL) = 1
+                                    THEN 1 ELSE 0 END,
+                                cl.depth DESC
+                       LIMIT 1
+                  ) bu ON true
                   JOIN asset_type t ON t.id = a.type_id AND t.code = 'APPLICATION'
                   LEFT JOIN application_review_cadence c ON c.asset_id = a.id
                   LEFT JOIN criticality_tier ct ON ct.id = a.criticality_tier_id
@@ -311,7 +355,7 @@ public final class AssessmentPlanQuery {
                 r.getString(10), r.getString(11), r.getLong(12), r.getLong(13),
                 r.getString(14),
                 r.getObject(15) == null ? null : Integer.valueOf(r.getInt(15)),
-                r.getLong(16), r.getLong(17), r.getLong(18), r.getString(19)));
+                r.getLong(16), r.getLong(17), r.getLong(18), r.getString(19), r.getString(20), r.getString(21)));
     }
 
     /**

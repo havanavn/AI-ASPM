@@ -77,27 +77,22 @@ SELECT '   ' || count(*)::text || ' of ' ||
   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
  WHERE c.relkind = 'r' AND n.nspname = 'public' AND c.relforcerowsecurity;
 
-\echo '-- the three tables deliberately outside row-level security, each with its reason:'
-\echo '     tenant                 registry of tenants. app_runtime is granted the tenant_self'
-\echo '                            VIEW and never the table, so the control is the grant.'
-\echo '     tenant_id_reservation  every tenant id ever issued, INCLUDING offboarded ones'
-\echo '                            (SEC-TEN-043). Scoping it per tenant would defeat it: its'
-\echo '                            purpose is to span tenants so an id cannot be reused.'
-\echo '     hash_partition_basis   partition counts are a deployment property, not tenant data.'
+\echo '-- the tables deliberately outside row-level security, each with the reason it registered'
+\echo '   (tenant_isolation_exemption, V072; a global table missing from here fails below):'
+SELECT '     ' || rpad(e.table_name, 28) || left(e.reason, 90) || CASE WHEN length(e.reason) > 90 THEN '…' ELSE '' END
+  FROM tenant_isolation_exemption e ORDER BY e.table_name;
 
-\echo '-- any OTHER table without forced row-level security (must be empty):'
+\echo '-- any OTHER table without forced row-level security, or a registered table that no longer exists'
+\echo '   (must be empty):'
 --
--- The three above are named rather than filtered by a predicate such as "has no tenant_id
+-- The exemptions are still NAMED rather than inferred from a predicate such as "has no tenant_id
 -- column", because tenant_id_reservation HAS one — there it is the subject of the row, not the
--- scope of it. A predicate that clever excludes the next table for the wrong reason and reports
--- nothing; an explicit list makes an undocumented exception fail here.
-SELECT '   ' || c.relname
-  FROM pg_class c
-  JOIN pg_namespace n ON n.oid = c.relnamespace
- WHERE c.relkind = 'r' AND n.nspname = 'public'
-   AND NOT c.relforcerowsecurity
-   AND c.relname NOT IN ('tenant', 'tenant_id_reservation', 'hash_partition_basis')
- ORDER BY c.relname;
+-- scope of it. What changed in V072 is where the names live: beside the tables they exempt, in one
+-- registry both this script and deploy/verify/conformance.sql read, after the two hand-maintained
+-- copies drifted apart and check 3 fired on four correctly global tables.
+SELECT '   ' || u.table_name || ': ' || u.finding
+  FROM unregistered_unforced_tables() u
+ ORDER BY u.table_name;
 
 \echo '-- range partition runway, in months (OPS-DEP-011; alerting below three):'
 SELECT '   ' || parent_table || ': ' || runway_months::text ||
@@ -111,5 +106,5 @@ SELECT '   ' || b.table_name || ': ' || b.partition_count::text ||
 SQL
 
 echo
-echo "== schema applied. This is the DATA TIER only — there is no application tier to start."
-echo "   See deploy/README.md for what exists and what does not."
+echo "== schema applied. The application tier starts against it: docker compose up -d app (compose),"
+echo "   or the Helm release's rollout continues (deploy/k8s). See deploy/README.md for what exists."

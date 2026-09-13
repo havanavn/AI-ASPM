@@ -502,11 +502,36 @@ public final class Dispatcher {
         //    callWith scopes the binding to the call and clears it afterwards, so nothing survives into
         //    the next request on this carrier thread — the same property OPS-DEP-010 requires of a
         //    pooled database connection, applied to the context itself.
+        //
+        //    Class G is the exception that was mishandled. A class G route authenticates by IDENTITY
+        //    inside its handler — /change-password, /account/sessions/revoke — rather than by a
+        //    catalogue permission, so step 2 leaves `principal` null and, until this branch existed,
+        //    no context was bound for it. Both of those handlers write an audit event, the chain writer
+        //    calls requireCurrent(), and every first sign-in of a bootstrapped account therefore ended
+        //    in a 500 at the forced password change. Reproduced on 2026-09-11 against the running
+        //    stack; no test had exercised a class G write.
+        //
+        //    The fix binds the context from the SESSION when one resolves, and from nothing otherwise.
+        //    It is still SEC-TEN-004: the tenant comes from an authenticated principal the resolver
+        //    produced, not from anything the request asserts. A class G request with no session, or
+        //    with a session that has not passed its second factor, runs without a context exactly as
+        //    before — sign-in, enrolment and the challenge write no chained event and need none. The
+        //    Request still carries a null principal, so no class G handler's own identity check is
+        //    weakened or bypassed by this binding.
+        Principal contextPrincipal = principal;
+        if (contextPrincipal == null) {
+            try {
+                contextPrincipal = principals.resolve(headers).orElse(null);
+            } catch (SecurityException e) {
+                contextPrincipal = null;
+            }
+        }
         try {
-            Response response = principal == null
+            Principal bound = contextPrincipal;
+            Response response = bound == null
                     ? route.handler().handle(request)
                     : aspm.kernel.tenantcontext.contract.TenantContextHolder.callWith(
-                            RequestScope.contextFor(principal),
+                            RequestScope.contextFor(bound),
                             () -> route.handler().handle(request));
             return withRestrictedFieldsAbsent(response, operation);
         } catch (UnauthorizedException e) {

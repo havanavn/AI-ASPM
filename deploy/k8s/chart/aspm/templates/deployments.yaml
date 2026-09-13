@@ -1,0 +1,114 @@
+{{- /*
+One Deployment per SHIPPED runtime unit, read from files/model.yaml. The same image runs both; ASPM_ROLE
+selects the unit (OPS-DEP-003). Probes are the model's two distinct paths (OPS-DEP-008); resources are
+the model's envelope for the unit's profile (OPS-DEP-005); the worker is spread away from the app tier
+so a node failure does not take both (and, when match workers arrive, OPS-DEP-006 lands here).
+*/ -}}
+{{- $model := include "aspm.model" . | fromJson -}}
+{{- range $name, $unit := $model.units }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "aspm.fullname" $ }}-{{ $name }}
+  labels:
+    {{- include "aspm.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+    aspm.io/model-unit: {{ $unit.modelUnit }}
+spec:
+  replicas: {{ index $.Values.replicas $name }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "aspm.unitLabels" (dict "root" $ "unit" $name) | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        {{- include "aspm.unitLabels" (dict "root" $ "unit" $name) | nindent 8 }}
+        aspm.io/model-unit: {{ $unit.modelUnit }}
+        {{- if and (eq $.Values.mesh.kind "istio") $.Values.mesh.istio.revision }}
+        istio.io/rev: {{ $.Values.mesh.istio.revision }}
+        {{- end }}
+      annotations:
+        {{- include "aspm.meshPodAnnotations" $ | nindent 8 }}
+        aspm.io/egress-classes: {{ join "," $unit.egress | quote }}
+    spec:
+      serviceAccountName: {{ include "aspm.fullname" $ }}-{{ $name }}
+      automountServiceAccountToken: {{ ternary true false (or (eq $.Values.secrets.provider "vault") (eq $.Values.secrets.provider "awssm") (eq $.Values.secrets.provider "gcpsm") (eq $.Values.secrets.provider "azkv")) }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ $.Values.podSecurity.runAsUser }}
+        fsGroup: {{ $.Values.podSecurity.fsGroup }}
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- include "aspm.unitLabels" (dict "root" $ "unit" $name) | nindent 20 }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "aspm.unitLabels" (dict "root" $ "unit" $name) | nindent 14 }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "aspm.image" $.Values.image | quote }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          # No secret in the pod spec and none in the process environment (OPS-DEP-019, OPS-DEP-020):
+          # every credential is an ASPM_*_REF pointing at a mounted file, resolved in memory at start.
+          env:
+            - name: ASPM_ROLE
+              value: {{ $unit.role | quote }}
+            {{- include "aspm.commonEnv" $ | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: {{ $unit.readinessPath }}
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: {{ $unit.livenessPath }}
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: {{ $unit.resources.cpuRequest | quote }}
+              memory: {{ $unit.resources.memoryRequest }}
+            limits:
+              cpu: {{ $unit.resources.cpuLimit | quote }}
+              memory: {{ $unit.resources.memoryLimit }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: aspm-secrets
+              mountPath: {{ $.Values.secrets.file.mountPath }}
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        {{- include "aspm.secretsVolume" $ | nindent 8 }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+{{- end }}

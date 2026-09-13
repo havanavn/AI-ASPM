@@ -87,6 +87,56 @@ class OperationManifestTest {
                 // factor requirable, SEC-SEC-009 regenerates the session on privilege change.
                 // One address each now. These were listed twice — once under /ui, once under /app — while
                 // the same gate answered at two prefixes.
+                case "/api/ui/notifications", "/api/ui/notifications/{id}/read" ->
+                        List.of("PRD-NTF-010", "PRD-NTF-018", "PRD-NTF-014");
+                case "/api/ui/account/notification-preferences" ->
+                        List.of("PRD-NTF-019", "PRD-NTF-020", "PRD-NTF-021", "CFG-NTF-001");
+                case "/api/ui/settings/notification-channels", "/api/ui/settings/notification-channels/{id}",
+                        "/api/ui/settings/notification-channels/{id}/transition" ->
+                        List.of("PRD-NTF-003", "CFG-NTF-001", "PRD-CON-017", "PRD-CON-021");
+                case "/api/ui/settings/notification-channels/{id}/verify", "/api/ui/settings/notification-channels/{id}/confirm" ->
+                        List.of("PRD-NTF-043");
+                case "/api/ui/settings/notification-channels/{id}/deliveries" ->
+                        List.of("PRD-NTF-011", "PRD-NTF-042");
+                case "/api/ui/settings/notification-routes" ->
+                        List.of("PRD-NTF-019", "CFG-NTF-001");
+                case "/api/ui/settings/connectors", "/api/ui/settings/connectors/{id}" ->
+                        List.of("PRD-CON-015", "PRD-CON-017", "PRD-CON-021", "PRD-CON-032", "PRD-CON-038");
+                case "/api/ui/settings/connectors/{id}/transition" ->
+                        List.of("PRD-CON-019", "PRD-CON-020", "PRD-CON-035");
+                case "/api/ui/settings/connectors/{id}/rotate" ->
+                        List.of("PRD-CON-022", "PRD-CON-023");
+                case "/api/ui/settings/connectors/{id}/probe", "/api/ui/settings/connectors/{id}/operations" ->
+                        List.of("PRD-CON-028", "PRD-CON-017");
+                case "/api/ui/findings/{id}/references" ->
+                        List.of("PRD-CON-042", "PRD-CON-045", "PRD-CON-038");
+                case "/api/ui/outbound-references/divergences", "/api/ui/outbound-references/{id}/resolve" ->
+                        List.of("PRD-CON-043", "PRD-CON-044");
+                case "/api/ui/outbound-references/{id}/retry" ->
+                        List.of("PRD-CON-026", "PRD-CON-025");
+                case "/api/ui/settings/report-schedules", "/api/ui/settings/report-schedules/{id}",
+                        "/api/ui/settings/report-schedules/{id}/recipients", "/api/ui/settings/report-schedules/{id}/transition",
+                        "/api/ui/settings/report-schedules/{id}/run" ->
+                        List.of("PRD-DSH-043", "PRD-DSH-045");
+                case "/api/ui/reports/artifacts", "/api/ui/reports/artifacts/{id}/download" ->
+                        List.of("PRD-DSH-043", "PRD-DSH-047");
+                case "/api/ui/reports/audit-evidence" ->
+                        List.of("PRD-DSH-046", "PRD-DSH-047", "PRD-DSH-048");
+                case "/api/ui/ai/ask" -> List.of("PRD-AIC-057", "PRD-AIC-030", "PRD-AIC-033", "PRD-AIC-034", "PRD-AIC-036");
+                case "/api/ui/ai/draft" -> List.of("PRD-AIC-019", "PRD-AIC-036");
+                case "/api/ui/ai/usage", "/api/ui/ai/budget" -> List.of("PRD-AIC-043", "PRD-AIC-044", "PRD-AIC-053", "PRD-AIC-054");
+                case "/api/ui/ai/evaluate", "/api/ui/ai/evaluations" -> List.of("PRD-AIC-049", "PRD-AIC-050");
+                case "/api/ui/ai-providers/{id}/test" -> List.of("PRD-AIC-023", "PRD-AIC-026");
+                case "/auth/{provider}/start", "/auth/callback" ->
+                        List.of("PRD-IAM-001", "SEC-SEC-002", "SEC-SEC-009", "PRD-CON-032");
+                case "/api/ui/access/identity-providers", "/api/ui/access/identity-providers/{id}",
+                        "/api/ui/access/identity-providers/{id}/transition",
+                        "/api/ui/access/identity-providers/{id}/test" ->
+                        List.of("PRD-IAM-001", "PRD-CON-010", "PRD-CON-017", "PRD-CON-021");
+                case "/api/ui/access/identity-providers/{id}/group-roles" ->
+                        List.of("PRD-IAM-001", "PRD-CON-010", "SEC-AUZ-014");
+                case "/api/ui/access/local-sign-in", "/api/ui/access/users/{id}/break-glass" ->
+                        List.of("SEC-SEC-002", "PRD-IAM-007");
                 case "/sign-in" ->
                         List.of("SEC-SEC-005", "SEC-SEC-013", "SEC-TEN-004");
                 case "/mfa" -> List.of("SEC-SEC-003", "SEC-SEC-009");

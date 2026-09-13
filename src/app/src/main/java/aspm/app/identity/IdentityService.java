@@ -145,6 +145,20 @@ public final class IdentityService {
                     return new SignIn.Rejected(0);
                 }
 
+                // SEC-SEC-002 (V074): local authentication is available only where no provider is
+                // configured and for break-glass. A tenant that turned it off refuses every password
+                // here, at the server, whatever the page showed — except for a principal an
+                // administrator flagged for break-glass, because the operator's own access cannot depend
+                // on an external provider being reachable (ADR-059's revisit trigger). Same cost and
+                // same message as a bad credential, so the switch's state is not readable by probing.
+                if (!localSignInPermitted(connection, principal.id())) {
+                    PasswordHash.verify(password, DUMMY);
+                    record(connection, presented, principal.id(), "LOCAL_SIGN_IN_DISABLED", "PASSWORD",
+                            sourceAddress, userAgent);
+                    connection.commit();
+                    return new SignIn.Rejected(0);
+                }
+
                 Optional<PasswordHash.Stored> credential = credential(connection, principal.id());
                 if (credential.isEmpty() || !PasswordHash.verify(password, credential.orElseThrow())) {
                     record(connection, presented, principal.id(), "BAD_CREDENTIAL", "PASSWORD",
@@ -421,65 +435,72 @@ public final class IdentityService {
      */
     public Optional<Principal> principal(UUID tenantId, Session session) throws SQLException {
         try (Connection connection = open(tenantId)) {
-            Set<String> permissions = new LinkedHashSet<>();
-            Set<UUID> scope = new LinkedHashSet<>();
-            boolean tenantWide = false;
-
-            try (PreparedStatement statement = connection.prepareStatement(
-                    "SELECT rp.permission_code, a.scope_mode, a.scope_node_id "
-                            + "  FROM role_assignment a "
-                            + "  JOIN role r ON r.id = a.role_id AND r.lifecycle_state = 'ACTIVE' "
-                            + "  JOIN role_permission rp ON rp.role_id = r.id "
-                            + " WHERE a.principal_id = ? AND a.revoked_at IS NULL "
-                            + "   AND (a.expires_at IS NULL OR a.expires_at > now())")) {
-                statement.setObject(1, session.principalId());
-                try (ResultSet results = statement.executeQuery()) {
-                    while (results.next()) {
-                        permissions.add(results.getString(1));
-                        if ("TENANT".equals(results.getString(2))) {
-                            tenantWide = true;
-                        } else {
-                            UUID node = results.getObject(3, UUID.class);
-                            if (node != null) {
-                                scope.add(node);
-                            }
-                        }
-                    }
-                }
-            }
-
-            // A tenant-wide assignment reaches every root, expanded through the closure table rather
-            // than expressed as a wildcard: product principle 4 makes scope derived, and a wildcard is
-            // an assertion.
-            if (tenantWide) {
-                try (PreparedStatement roots = connection.prepareStatement(
-                        "SELECT id FROM org_node WHERE parent_id IS NULL")) {
-                    try (ResultSet results = roots.executeQuery()) {
-                        while (results.next()) {
-                            scope.add(results.getObject(1, UUID.class));
-                        }
-                    }
-                }
-            }
-
             // Both flags come from the SESSION, and both were literal `false` here until V016.
             //
             // stepUpAuthenticated being false made the dispatcher's step-up gate unsatisfiable: every
             // class C and class E operation answered 401 to every human caller, and no surface existed
             // that could clear the condition. The gate was closed and had no key.
-            boolean stepUp = session.stepUpFresh();
-            boolean mustChange = session.mustChangePassword();
-
-            if (permissions.isEmpty()) {
-                // SEC-AUZ-014 denies on an empty grant rather than allowing over nothing. A principal
-                // with no role is authenticated and authorized for nothing, which is correct and is not
-                // the same as unauthenticated.
-                return Optional.of(new Principal(tenantId, session.principalId(), Set.of(), Set.of(),
-                        stepUp, false, mustChange));
-            }
-            return Optional.of(new Principal(tenantId, session.principalId(),
-                    Set.copyOf(permissions), Set.copyOf(scope), stepUp, false, mustChange));
+            return Optional.of(effectivePrincipal(connection, tenantId, session.principalId(), session.stepUpFresh(),
+                    session.mustChangePassword()));
         }
+    }
+
+    /**
+     * A principal's permissions and scope, resolved from role assignments NOW — the one derivation the
+     * session path and the scheduled-report path share, so a report rendered for a recipient at
+     * generation time ({@code PRD-DSH-043}) sees exactly what that recipient would see signing in at
+     * that moment, and a revocation reaches both within the same bound ({@code SEC-SEC-011}).
+     */
+    public static Principal effectivePrincipal(Connection connection, UUID tenantId, UUID principalId, boolean stepUp,
+            boolean mustChange) throws SQLException {
+        Set<String> permissions = new LinkedHashSet<>();
+        Set<UUID> scope = new LinkedHashSet<>();
+        boolean tenantWide = false;
+
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT rp.permission_code, a.scope_mode, a.scope_node_id "
+                        + "  FROM role_assignment a "
+                        + "  JOIN role r ON r.id = a.role_id AND r.lifecycle_state = 'ACTIVE' "
+                        + "  JOIN role_permission rp ON rp.role_id = r.id "
+                        + " WHERE a.principal_id = ? AND a.revoked_at IS NULL "
+                        + "   AND (a.expires_at IS NULL OR a.expires_at > now())")) {
+            statement.setObject(1, principalId);
+            try (ResultSet results = statement.executeQuery()) {
+                while (results.next()) {
+                    permissions.add(results.getString(1));
+                    if ("TENANT".equals(results.getString(2))) {
+                        tenantWide = true;
+                    } else {
+                        UUID node = results.getObject(3, UUID.class);
+                        if (node != null) {
+                            scope.add(node);
+                        }
+                    }
+                }
+            }
+        }
+
+        // A tenant-wide assignment reaches every root, expanded through the closure table rather
+        // than expressed as a wildcard: product principle 4 makes scope derived, and a wildcard is
+        // an assertion.
+        if (tenantWide) {
+            try (PreparedStatement roots = connection.prepareStatement(
+                    "SELECT id FROM org_node WHERE parent_id IS NULL")) {
+                try (ResultSet results = roots.executeQuery()) {
+                    while (results.next()) {
+                        scope.add(results.getObject(1, UUID.class));
+                    }
+                }
+            }
+        }
+
+        if (permissions.isEmpty()) {
+            // SEC-AUZ-014 denies on an empty grant rather than allowing over nothing. A principal
+            // with no role is authenticated and authorized for nothing, which is correct and is not
+            // the same as unauthenticated.
+            return new Principal(tenantId, principalId, Set.of(), Set.of(), stepUp, false, mustChange);
+        }
+        return new Principal(tenantId, principalId, Set.copyOf(permissions), Set.copyOf(scope), stepUp, false, mustChange);
     }
 
     /**
@@ -603,6 +624,22 @@ public final class IdentityService {
             boolean mustChangePassword) {
     }
 
+    /** SEC-SEC-002: the tenant switch, with the per-principal break-glass exception. */
+    private static boolean localSignInPermitted(Connection connection, UUID principalId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                // The tenant predicate is stated even though row-level security supplies it for the
+                // application role: a connection that bypasses RLS — the test engine's superuser, a DBA
+                // session — would otherwise read whichever tenant's policy came first, and the test that
+                // found this read another tenant's `true`.
+                "SELECT coalesce((SELECT local_sign_in_enabled FROM password_policy WHERE tenant_id = current_tenant_id() LIMIT 1), true) "
+                        + "OR (SELECT break_glass_local_sign_in FROM principal WHERE id = ? AND tenant_id = current_tenant_id())")) {
+            statement.setObject(1, principalId);
+            try (ResultSet results = statement.executeQuery()) {
+                return results.next() && results.getBoolean(1);
+            }
+        }
+    }
+
     private static Optional<Row> lookup(Connection connection, String presented) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
                 "SELECT id, lifecycle_state, mfa_enrolled_at, must_change_password FROM principal "
@@ -723,14 +760,37 @@ public final class IdentityService {
             statement.setObject(2, principalId);
             statement.setString(3, outcome);
             statement.setString(4, factor);
-            statement.setString(5, sourceAddress);
+            statement.setString(5, clientAddress(sourceAddress));
             statement.setString(6, userAgent == null ? null
                     : userAgent.substring(0, Math.min(512, userAgent.length())));
             statement.executeUpdate();
         }
     }
 
-    private static String createSession(Connection connection, UUID principalId, UUID tenantId,
+    /**
+     * The client's address from a forwarded-for header, as one {@code inet} value.
+     *
+     * <p>{@code X-Forwarded-For} is a LIST: behind two proxies it reads {@code "203.0.113.7, 10.0.0.1"},
+     * and binding that to an {@code inet} column fails the whole sign-in with a 500 — found by the
+     * federated sign-in test, which passes a two-hop value on purpose. The first entry is the client
+     * as the outermost proxy saw it; everything after it is the platform's own infrastructure. Blank
+     * or unparseable → NULL, recorded rather than fabricated (SEC-SEC-008 wants source context, not a
+     * guess at it).
+     */
+    static String clientAddress(String forwardedFor) {
+        if (forwardedFor == null || forwardedFor.isBlank()) {
+            return null;
+        }
+        String first = forwardedFor.split(",")[0].strip();
+        if (first.startsWith("[") && first.contains("]")) {
+            first = first.substring(1, first.indexOf(']'));
+        } else if (first.chars().filter(ch -> ch == ':').count() == 1) {
+            first = first.substring(0, first.indexOf(':'));   // IPv4 with a port
+        }
+        return first.matches("[0-9a-fA-F:.]{2,45}") ? first : null;
+    }
+
+    static String createSession(Connection connection, UUID principalId, UUID tenantId,
             String factorState, PasswordPolicy.Settings settings, String sourceAddress,
             String userAgent, Duration absolute) throws SQLException {
         // 32 bytes — 256 bits, comfortably above SEC-SEC-009's 128 — and encoding nothing.
@@ -745,7 +805,7 @@ public final class IdentityService {
             statement.setString(4, factorState);
             statement.setString(5, absolute.toSeconds() + " seconds");
             statement.setInt(6, settings.sessionIdleSeconds());
-            statement.setString(7, sourceAddress);
+            statement.setString(7, clientAddress(sourceAddress));
             statement.setString(8, userAgent == null ? null
                     : userAgent.substring(0, Math.min(512, userAgent.length())));
             statement.executeUpdate();

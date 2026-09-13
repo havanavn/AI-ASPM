@@ -13,6 +13,11 @@ export interface Posture {
   serious: number; exposedSerious: number;
   lastAssessedAt: string | null;
   measured: boolean;
+  /** Open findings past their remediation commitment (service level breached, unresolved). */
+  breached: number;
+  /** Applications the review interval says are owed a review, and those among them with no planned window. */
+  reviewsDue: number;
+  reviewsUnplanned: number;
 }
 
 /**
@@ -67,6 +72,11 @@ export function OrgPosture({ rows }: { rows: Posture[] }) {
               <TableHead className="text-right">Open findings</TableHead>
               <TableHead className="text-right">Serious</TableHead>
               <TableHead className="text-right">Serious &amp; exposed</TableHead>
+              <TableHead className="text-right">Past commitment</TableHead>
+              <TableHead className="text-right">Reviews owed</TableHead>
+              <TableHead className="text-right" title="Open findings per 10 applications — the normalization PRD-DSH-035 asks for, so a large unit is not read as a bad one">
+                Open / 10 apps
+              </TableHead>
               <TableHead>Last assessed</TableHead>
             </TableRow>
           </TableHeader>
@@ -105,6 +115,31 @@ export function OrgPosture({ rows }: { rows: Posture[] }) {
                       ? <Badge tone="critical">{o.exposedSerious}</Badge>
                       : <span className="tabular text-xs text-muted-foreground">0</span>}
                   </TableCell>
+                  <TableCell className="text-right">
+                    {o.breached > 0
+                      ? <Badge tone="critical">{o.breached}</Badge>
+                      : <span className="tabular text-xs text-muted-foreground">0</span>}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {/* Owed, and how many of those nobody has planned. The second number is the one
+                        that becomes next quarter's overdue. */}
+                    {o.reviewsDue > 0 ? (
+                      <span className="tabular text-xs">
+                        {o.reviewsDue}
+                        {o.reviewsUnplanned > 0 && (
+                          <span className="ml-1 text-sev-high" title="of which no window is planned">
+                            ({o.reviewsUnplanned} unplanned)
+                          </span>
+                        )}
+                      </span>
+                    ) : <span className="tabular text-xs text-muted-foreground">0</span>}
+                  </TableCell>
+                  <TableCell className="tabular text-right text-xs">
+                    {/* Null, not zero, when there is nothing to divide by (PRD-ASM-023). */}
+                    {o.applications === 0
+                      ? <span className="italic text-tone-unknown">—</span>
+                      : (10 * o.openNow / o.applications).toFixed(1)}
+                  </TableCell>
                   <TableCell className="font-mono text-[11px]">
                     {/* Never is a fact, and a worse one than a stale date. */}
                     {o.lastAssessedAt
@@ -121,7 +156,10 @@ export function OrgPosture({ rows }: { rows: Posture[] }) {
       <div className="border-t px-5 py-3 text-[11px] text-muted-foreground">
         <strong>Serious &amp; exposed</strong> counts findings that are at the top two severities{" "}
         <em>and</em> on an internet-facing <em>and</em> business-critical asset — three recorded
-        facts, not a score.{" "}
+        facts, not a score. <strong>Past commitment</strong> is measured against the service level
+        the organization set for itself. <strong>Open / 10 apps</strong> normalizes for portfolio
+        size only, not for criticality mix; read it beside <em>Never assessed</em>, because an
+        unmeasured unit looks clean.{" "}
         <Link to="/applications" className="text-primary hover:underline">Open the inventory</Link>
       </div>
     </div>

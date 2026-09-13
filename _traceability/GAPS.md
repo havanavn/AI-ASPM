@@ -6,16 +6,20 @@ A gap is closed by writing the test, never by weakening the requirement.
 
 ## Forward: every MUST_HAVE requirement has a passing test case
 
-**FAIL** — 444 of 1113 active MUST_HAVE requirements (39.9%) are cited by a passing test.
+**FAIL** — 539 of 1131 active MUST_HAVE requirements (47.7%) are cited by a passing test.
 
-- 667 cited by no test at all, of which **100 are cited by main source or schema** — built and unverified, which is the worse of the two gaps and the one a headline percentage hides. The other 567 are not built.
-- 2 cited only by a `@Disabled`, failing, or unexecuted test
+- 586 cited by no test at all, of which **97 are cited by main source or schema** — built and unverified, which is the worse of the two gaps and the one a headline percentage hides. The other 489 are not built.
+- 6 cited only by a `@Disabled`, failing, or unexecuted test
 
 ### Cited only by a disabled or failing test
 
 | Requirement | Document | Citation |
 |---|---|---|
+| `OPS-DEP-029` | DOC-15 | AllMigrations#<class-level citation> (not executed); FederatedSignInTest#allMigrationsApplied (FAILING) |
+| `PRD-IAM-004` | DOC-01 | FederatedSignInTest#<class-level citation> (FAILING); FederatedSignInTest#firstSignInProvisionsAndMaps (FAILING) |
+| `PRD-IAM-012` | DOC-01 | FederatedSignInTest#<class-level citation> (FAILING) |
 | `PRD-ING-014` | DOC-01 | IsolationPathInventoryTest#export (@Disabled) |
+| `SEC-SEC-008` | DOC-06 | FederatedSignInTest#<class-level citation> (FAILING); FederatedSignInTest#handshakeIsSingleUse (FAILING) |
 | `SEC-TEN-011` | DOC-24 | IsolationPathInventoryTest#apiWrite (@Disabled) |
 
 ### Built and unverified — cited by code, by no test
@@ -34,9 +38,8 @@ A gap is closed by writing the test, never by weakening the requirement.
 | `NFR-PLT-002` | DOC-01 |
 | `NFR-SBM-002` | DOC-01 |
 | `NFR-SEC-002` | DOC-01 |
-| `OPS-DEP-003` | DOC-15 |
 | `OPS-DEP-004` | DOC-15 |
-| `OPS-DEP-015` | DOC-15 |
+| `OPS-DEP-021` | DOC-15 |
 | `OPS-DEP-022` | DOC-15 |
 | `OPS-DEP-025` | DOC-15 |
 | `OPS-DEP-030` | DOC-15 |
@@ -46,21 +49,20 @@ A gap is closed by writing the test, never by weakening the requirement.
 | `OPS-DEP-042` | DOC-15 |
 | `OPS-DEP-046` | DOC-15 |
 | `OPS-DEP-047` | DOC-15 |
-| `PRD-AIC-023` | DOC-10 |
+| `PRD-AIC-027` | DOC-10 |
+| `PRD-AIC-031` | DOC-10 |
 | `PRD-API-006` | DOC-01 |
 | `PRD-API-011` | DOC-01 |
-| `PRD-ASM-012` | DOC-01 |
+| `PRD-API-053` | DOC-05 |
 | `PRD-AST-006` | DOC-01 |
-| `PRD-AST-011` | DOC-01 |
 | `PRD-AUD-004` | DOC-01 |
 | `PRD-AUD-009` | DOC-01 |
-| `PRD-CAP-001` | DOC-01 |
 | `PRD-CAP-002` | DOC-01 |
 | `PRD-CAP-003` | DOC-01 |
 | `PRD-CAP-009` | DOC-01 |
 | `PRD-CAP-015` | DOC-01 |
-| `PRD-CON-021` | DOC-21 |
-| `PRD-CON-025` | DOC-21 |
+| `PRD-CON-018` | DOC-21 |
+| `PRD-CON-055` | DOC-21 |
 | `PRD-DSH-018` | DOC-12 |
 | `PRD-DSH-024` | DOC-12 |
 | `PRD-DSH-026` | DOC-12 |
@@ -69,19 +71,21 @@ A gap is closed by writing the test, never by weakening the requirement.
 | `PRD-DSH-033` | DOC-12 |
 | `PRD-DSH-035` | DOC-12 |
 | `PRD-DSH-039` | DOC-12 |
-| `PRD-IAM-012` | DOC-01 |
+| `PRD-DSH-040` | DOC-12 |
+| `PRD-DSH-044` | DOC-12 |
 | `PRD-ING-004` | DOC-01 |
 | `PRD-ING-022` | DOC-11 |
-| `PRD-NTF-032` | DOC-13 |
+| `PRD-NTF-016` | DOC-13 |
 | `PRD-NTF-033` | DOC-13 |
 | `PRD-NTF-034` | DOC-13 |
+| `PRD-NTF-041` | DOC-13 |
+| `PRD-NTF-045` | DOC-13 |
 | `PRD-ORG-002` | DOC-01 |
 | `PRD-ORG-007` | DOC-01 |
 | `PRD-PLT-011` | DOC-17 |
 | `PRD-RSK-044` | DOC-28 |
 | `PRD-SBM-013` | DOC-01 |
 | `PRD-SBM-033` | DOC-22 |
-| `PRD-SBM-035` | DOC-22 |
 | `PRD-SBM-047` | DOC-22 |
 | `PRD-SBM-048` | DOC-22 |
 | `PRD-SBM-049` | DOC-22 |
@@ -99,87 +103,84 @@ A gap is closed by writing the test, never by weakening the requirement.
 | `PRD-WRK-018` | DOC-01 |
 | `SEC-AUD-003` | DOC-14 |
 | `SEC-AUD-007` | DOC-14 |
-| `SEC-AUD-009` | DOC-14 |
 | `SEC-AUD-017` | DOC-14 |
 | `SEC-AUD-022` | DOC-14 |
-| `SEC-AUZ-001` | DOC-07 |
 | `SEC-AUZ-002` | DOC-07 |
 | `SEC-AUZ-044` | DOC-07 |
 | `SEC-AUZ-050` | DOC-07 |
-| `SEC-SEC-010` | DOC-06 |
+| `SEC-SEC-007` | DOC-06 |
 | `SEC-SEC-014` | DOC-06 |
-| `SEC-SEC-023` | DOC-06 |
-| `SEC-SEC-024` | DOC-06 |
+| `SEC-SEC-026` | DOC-06 |
 | `SEC-SEC-029` | DOC-06 |
 | `SEC-SEC-056` | DOC-06 |
 | `SEC-SEC-058` | DOC-06 |
 | `SEC-TEN-001` | DOC-24 |
 | `SEC-TEN-009` | DOC-24 |
 | `SEC-TEN-010` | DOC-24 |
+| `SEC-TEN-016` | DOC-24 |
 | `SEC-TEN-018` | DOC-24 |
 | `SEC-TEN-041` | DOC-24 |
 | `SEC-TEN-043` | DOC-24 |
 | `SEC-TEN-047` | DOC-24 |
-| `TST-ING-001` | DOC-16 |
 | `TST-PLT-007` | DOC-16 |
 
 ### Cited by no test, by owning document
 
 | Document | MUST_HAVE without a test |
 |---|---|
-| DOC-01 | 292 |
-| DOC-05 | 31 |
-| DOC-06 | 55 |
-| DOC-07 | 24 |
+| DOC-01 | 267 |
+| DOC-05 | 29 |
+| DOC-06 | 47 |
+| DOC-07 | 27 |
 | DOC-08 | 14 |
 | DOC-09 | 1 |
-| DOC-10 | 30 |
+| DOC-10 | 13 |
 | DOC-11 | 21 |
-| DOC-12 | 22 |
-| DOC-13 | 16 |
-| DOC-14 | 25 |
-| DOC-15 | 24 |
-| DOC-16 | 18 |
+| DOC-12 | 19 |
+| DOC-13 | 8 |
+| DOC-14 | 24 |
+| DOC-15 | 20 |
+| DOC-16 | 16 |
 | DOC-17 | 2 |
-| DOC-21 | 24 |
-| DOC-22 | 22 |
+| DOC-21 | 11 |
+| DOC-22 | 21 |
 | DOC-24 | 39 |
 | DOC-26 | 5 |
 | DOC-28 | 2 |
 
 <details><summary>Every identifier</summary>
 
-**DOC-01** — `CFG-AIC-001`, `CFG-ASM-001`, `CFG-AST-001`, `CFG-AUZ-001`, `CFG-AUZ-002`, `CFG-NTF-001`, `CFG-PLT-001`, `CFG-PLT-002`, `CFG-PLT-003`, `CFG-PLT-004`, `CFG-PLT-005`, `CFG-PLT-006`, `CFG-PLT-007`, `CFG-PLT-009`, `CFG-PLT-010`, `CFG-PLT-012`, `CFG-PTR-001`, `CFG-RSK-001`, `CFG-RSK-002`, `CFG-TEN-001`, `CFG-VUL-001`, `CFG-WRK-001`, `CFG-WRK-002`, `CFG-WRK-003`, `CFG-WRK-004`, `LIC-PLT-002`, `LIC-PLT-003`, `LIC-PLT-004`, `LIC-PLT-005`, `LIC-PLT-006`, `LIC-PLT-007`, `LIC-PLT-010`, `NFR-AIC-001`, `NFR-API-001`, `NFR-API-002`, `NFR-AUD-001`, `NFR-AUD-002`, `NFR-DEP-001`, `NFR-DEP-002`, `NFR-DEP-004`, `NFR-DEP-005`, `NFR-DSH-001`, `NFR-DSH-002`, `NFR-DSH-003`, `NFR-ING-001`, `NFR-ING-002`, `NFR-INT-001`, `NFR-INT-003`, `NFR-INT-004`, `NFR-NTF-001`, `NFR-OPS-001`, `NFR-OPS-003`, `NFR-PLT-001`, `NFR-PLT-002`, `NFR-PLT-003`, `NFR-SBM-001`, `NFR-SBM-002`, `NFR-SEC-001`, `NFR-SEC-002`, `NFR-UIX-001`, `NFR-VUL-001`, `NFR-WRK-001`, `NFR-WRK-002`, `PRD-AIC-001`, `PRD-AIC-002`, `PRD-AIC-003`, `PRD-AIC-004`, `PRD-AIC-005`, `PRD-AIC-006`, `PRD-AIC-007`, `PRD-AIC-009`, `PRD-AIC-010`, `PRD-AIC-011`, `PRD-AIC-012`, `PRD-AIC-013`, `PRD-API-001`, `PRD-API-003`, `PRD-API-005`, `PRD-API-006`, `PRD-API-007`, `PRD-API-008`, `PRD-API-009`, `PRD-API-010`, `PRD-API-011`, `PRD-API-012`, `PRD-API-013`, `PRD-ASM-001`, `PRD-ASM-002`, `PRD-ASM-004`, `PRD-ASM-005`, `PRD-ASM-006`, `PRD-ASM-007`, `PRD-ASM-009`, `PRD-ASM-012`, `PRD-ASM-014`, `PRD-AST-003`, `PRD-AST-006`, `PRD-AST-007`, `PRD-AST-009`, `PRD-AST-010`, `PRD-AST-011`, `PRD-AST-012`, `PRD-AST-013`, `PRD-AST-014`, `PRD-AST-015`, `PRD-AST-018`, `PRD-AUD-002`, `PRD-AUD-004`, `PRD-AUD-005`, `PRD-AUD-006`, `PRD-AUD-007`, `PRD-AUD-009`, `PRD-AUD-010`, `PRD-AUZ-004`, `PRD-AUZ-005`, `PRD-AUZ-006`, `PRD-AUZ-007`, `PRD-AUZ-008`, `PRD-AUZ-009`, `PRD-AUZ-011`, `PRD-AUZ-012`, `PRD-AUZ-013`, `PRD-AUZ-014`, `PRD-CAP-001`, `PRD-CAP-002`, `PRD-CAP-003`, `PRD-CAP-004`, `PRD-CAP-006`, `PRD-CAP-007`, `PRD-CAP-009`, `PRD-CAP-015`, `PRD-CON-001`, `PRD-CON-002`, `PRD-CON-003`, `PRD-CON-004`, `PRD-CON-005`, `PRD-CON-006`, `PRD-CON-007`, `PRD-CON-009`, `PRD-CON-010`, `PRD-CON-014`, `PRD-DSH-001`, `PRD-DSH-004`, `PRD-DSH-005`, `PRD-DSH-009`, `PRD-DSH-011`, `PRD-DSH-015`, `PRD-DSH-016`, `PRD-EXC-001`, `PRD-EXC-002`, `PRD-EXC-003`, `PRD-EXC-004`, `PRD-EXC-005`, `PRD-EXC-007`, `PRD-EXC-009`, `PRD-EXC-010`, `PRD-IAM-001`, `PRD-IAM-004`, `PRD-IAM-005`, `PRD-IAM-008`, `PRD-IAM-009`, `PRD-IAM-010`, `PRD-IAM-011`, `PRD-IAM-012`, `PRD-ING-001`, `PRD-ING-002`, `PRD-ING-003`, `PRD-ING-004`, `PRD-ING-005`, `PRD-ING-006`, `PRD-ING-007`, `PRD-ING-009`, `PRD-ING-010`, `PRD-ING-012`, `PRD-ING-013`, `PRD-ING-015`, `PRD-ING-016`, `PRD-ING-017`, `PRD-ING-018`, `PRD-KBS-001`, `PRD-KBS-002`, `PRD-KBS-004`, `PRD-NTF-002`, `PRD-NTF-003`, `PRD-NTF-004`, `PRD-NTF-005`, `PRD-NTF-006`, `PRD-NTF-008`, `PRD-NTF-011`, `PRD-NTF-012`, `PRD-ORG-002`, `PRD-ORG-003`, `PRD-ORG-007`, `PRD-ORG-008`, `PRD-ORG-009`, `PRD-ORG-010`, `PRD-ORG-011`, `PRD-ORG-013`, `PRD-ORG-014`, `PRD-PTR-001`, `PRD-PTR-002`, `PRD-PTR-003`, `PRD-PTR-004`, `PRD-PTR-005`, `PRD-PTR-006`, `PRD-PTR-007`, `PRD-PTR-008`, `PRD-PTR-010`, `PRD-PTR-011`, `PRD-PTR-012`, `PRD-PTR-013`, `PRD-PTR-014`, `PRD-PTR-015`, `PRD-PTR-016`, `PRD-PTR-019`, `PRD-PTR-023`, `PRD-RSK-001`, `PRD-RSK-002`, `PRD-RSK-003`, `PRD-RSK-005`, `PRD-RSK-006`, `PRD-RSK-007`, `PRD-RSK-008`, `PRD-RSK-009`, `PRD-RSK-010`, `PRD-RSK-011`, `PRD-RSK-012`, `PRD-RSK-013`, `PRD-RSK-014`, `PRD-SBM-002`, `PRD-SBM-003`, `PRD-SBM-004`, `PRD-SBM-005`, `PRD-SBM-007`, `PRD-SBM-010`, `PRD-SBM-011`, `PRD-SBM-012`, `PRD-SBM-013`, `PRD-SBM-014`, `PRD-SBM-015`, `PRD-SBM-016`, `PRD-SBM-017`, `PRD-SBM-019`, `PRD-SBM-020`, `PRD-SBM-021`, `PRD-SBM-022`, `PRD-SBM-023`, `PRD-SBM-024`, `PRD-TEN-001`, `PRD-TEN-002`, `PRD-TEN-003`, `PRD-TEN-004`, `PRD-TEN-005`, `PRD-TEN-006`, `PRD-TEN-007`, `PRD-TEN-008`, `PRD-TEN-009`, `PRD-VUL-002`, `PRD-VUL-003`, `PRD-VUL-004`, `PRD-VUL-005`, `PRD-VUL-006`, `PRD-VUL-007`, `PRD-VUL-008`, `PRD-VUL-010`, `PRD-VUL-011`, `PRD-VUL-012`, `PRD-VUL-013`, `PRD-VUL-014`, `PRD-VUL-015`, `PRD-VUL-016`, `PRD-VUL-017`, `PRD-VUL-020`, `PRD-WRK-001`, `PRD-WRK-002`, `PRD-WRK-003`, `PRD-WRK-006`, `PRD-WRK-007`, `PRD-WRK-008`, `PRD-WRK-009`, `PRD-WRK-010`, `PRD-WRK-011`, `PRD-WRK-012`, `PRD-WRK-015`, `PRD-WRK-016`, `PRD-WRK-018`, `PRD-WRK-024`, `PRD-WRK-025`, `PRD-WRK-026`, `PRD-WRK-027`, `PRD-WRK-028`, `PRD-WRK-030`
+**DOC-01** — `CFG-AST-001`, `CFG-AUZ-001`, `CFG-AUZ-002`, `CFG-PLT-001`, `CFG-PLT-002`, `CFG-PLT-003`, `CFG-PLT-004`, `CFG-PLT-005`, `CFG-PLT-006`, `CFG-PLT-007`, `CFG-PLT-009`, `CFG-PLT-010`, `CFG-PLT-012`, `CFG-PTR-001`, `CFG-RSK-001`, `CFG-RSK-002`, `CFG-TEN-001`, `CFG-VUL-001`, `CFG-WRK-001`, `CFG-WRK-002`, `CFG-WRK-003`, `CFG-WRK-004`, `LIC-PLT-002`, `LIC-PLT-003`, `LIC-PLT-004`, `LIC-PLT-005`, `LIC-PLT-006`, `LIC-PLT-007`, `LIC-PLT-010`, `NFR-AIC-001`, `NFR-API-001`, `NFR-API-002`, `NFR-AUD-001`, `NFR-AUD-002`, `NFR-DEP-001`, `NFR-DEP-002`, `NFR-DEP-004`, `NFR-DEP-005`, `NFR-DSH-001`, `NFR-DSH-002`, `NFR-DSH-003`, `NFR-ING-001`, `NFR-ING-002`, `NFR-INT-001`, `NFR-INT-003`, `NFR-INT-004`, `NFR-NTF-001`, `NFR-OPS-001`, `NFR-OPS-003`, `NFR-PLT-001`, `NFR-PLT-002`, `NFR-PLT-003`, `NFR-SBM-001`, `NFR-SBM-002`, `NFR-SEC-001`, `NFR-SEC-002`, `NFR-UIX-001`, `NFR-VUL-001`, `NFR-WRK-001`, `NFR-WRK-002`, `PRD-AIC-001`, `PRD-AIC-002`, `PRD-AIC-003`, `PRD-AIC-004`, `PRD-AIC-005`, `PRD-AIC-006`, `PRD-AIC-007`, `PRD-AIC-009`, `PRD-AIC-010`, `PRD-AIC-011`, `PRD-AIC-012`, `PRD-AIC-013`, `PRD-API-001`, `PRD-API-003`, `PRD-API-005`, `PRD-API-006`, `PRD-API-007`, `PRD-API-008`, `PRD-API-009`, `PRD-API-010`, `PRD-API-011`, `PRD-API-012`, `PRD-API-013`, `PRD-ASM-001`, `PRD-ASM-004`, `PRD-ASM-005`, `PRD-ASM-006`, `PRD-ASM-009`, `PRD-ASM-014`, `PRD-AST-003`, `PRD-AST-006`, `PRD-AST-007`, `PRD-AST-009`, `PRD-AST-010`, `PRD-AST-013`, `PRD-AST-015`, `PRD-AST-018`, `PRD-AUD-002`, `PRD-AUD-004`, `PRD-AUD-005`, `PRD-AUD-006`, `PRD-AUD-007`, `PRD-AUD-009`, `PRD-AUD-010`, `PRD-AUZ-004`, `PRD-AUZ-005`, `PRD-AUZ-007`, `PRD-AUZ-008`, `PRD-AUZ-009`, `PRD-AUZ-011`, `PRD-AUZ-012`, `PRD-AUZ-013`, `PRD-AUZ-014`, `PRD-CAP-002`, `PRD-CAP-003`, `PRD-CAP-004`, `PRD-CAP-006`, `PRD-CAP-007`, `PRD-CAP-009`, `PRD-CAP-015`, `PRD-CON-001`, `PRD-CON-002`, `PRD-CON-003`, `PRD-CON-004`, `PRD-CON-005`, `PRD-CON-006`, `PRD-CON-007`, `PRD-CON-009`, `PRD-CON-014`, `PRD-DSH-001`, `PRD-DSH-004`, `PRD-DSH-005`, `PRD-DSH-009`, `PRD-DSH-011`, `PRD-DSH-015`, `PRD-DSH-016`, `PRD-EXC-001`, `PRD-EXC-002`, `PRD-EXC-003`, `PRD-EXC-004`, `PRD-EXC-005`, `PRD-EXC-007`, `PRD-EXC-009`, `PRD-EXC-010`, `PRD-IAM-005`, `PRD-IAM-008`, `PRD-IAM-009`, `PRD-IAM-010`, `PRD-IAM-011`, `PRD-ING-001`, `PRD-ING-002`, `PRD-ING-003`, `PRD-ING-004`, `PRD-ING-005`, `PRD-ING-006`, `PRD-ING-007`, `PRD-ING-009`, `PRD-ING-010`, `PRD-ING-012`, `PRD-ING-013`, `PRD-ING-015`, `PRD-ING-016`, `PRD-ING-017`, `PRD-ING-018`, `PRD-KBS-001`, `PRD-KBS-002`, `PRD-KBS-004`, `PRD-NTF-002`, `PRD-NTF-004`, `PRD-NTF-005`, `PRD-NTF-006`, `PRD-NTF-008`, `PRD-NTF-012`, `PRD-ORG-002`, `PRD-ORG-007`, `PRD-ORG-008`, `PRD-ORG-009`, `PRD-ORG-010`, `PRD-ORG-011`, `PRD-ORG-013`, `PRD-ORG-014`, `PRD-PTR-001`, `PRD-PTR-002`, `PRD-PTR-003`, `PRD-PTR-004`, `PRD-PTR-006`, `PRD-PTR-007`, `PRD-PTR-008`, `PRD-PTR-010`, `PRD-PTR-011`, `PRD-PTR-012`, `PRD-PTR-013`, `PRD-PTR-014`, `PRD-PTR-015`, `PRD-PTR-016`, `PRD-PTR-019`, `PRD-PTR-023`, `PRD-RSK-001`, `PRD-RSK-002`, `PRD-RSK-003`, `PRD-RSK-005`, `PRD-RSK-006`, `PRD-RSK-007`, `PRD-RSK-008`, `PRD-RSK-009`, `PRD-RSK-010`, `PRD-RSK-011`, `PRD-RSK-012`, `PRD-RSK-013`, `PRD-RSK-014`, `PRD-SBM-002`, `PRD-SBM-003`, `PRD-SBM-004`, `PRD-SBM-005`, `PRD-SBM-007`, `PRD-SBM-010`, `PRD-SBM-011`, `PRD-SBM-012`, `PRD-SBM-013`, `PRD-SBM-014`, `PRD-SBM-015`, `PRD-SBM-016`, `PRD-SBM-017`, `PRD-SBM-019`, `PRD-SBM-020`, `PRD-SBM-021`, `PRD-SBM-022`, `PRD-SBM-023`, `PRD-TEN-001`, `PRD-TEN-002`, `PRD-TEN-003`, `PRD-TEN-005`, `PRD-TEN-006`, `PRD-TEN-007`, `PRD-TEN-008`, `PRD-TEN-009`, `PRD-VUL-003`, `PRD-VUL-005`, `PRD-VUL-006`, `PRD-VUL-007`, `PRD-VUL-008`, `PRD-VUL-010`, `PRD-VUL-011`, `PRD-VUL-012`, `PRD-VUL-014`, `PRD-VUL-016`, `PRD-VUL-017`, `PRD-VUL-020`, `PRD-WRK-001`, `PRD-WRK-002`, `PRD-WRK-003`, `PRD-WRK-006`, `PRD-WRK-007`, `PRD-WRK-008`, `PRD-WRK-009`, `PRD-WRK-010`, `PRD-WRK-011`, `PRD-WRK-012`, `PRD-WRK-015`, `PRD-WRK-016`, `PRD-WRK-018`, `PRD-WRK-024`, `PRD-WRK-025`, `PRD-WRK-026`, `PRD-WRK-027`, `PRD-WRK-028`, `PRD-WRK-030`
 
-**DOC-05** — `PRD-API-015`, `PRD-API-016`, `PRD-API-018`, `PRD-API-022`, `PRD-API-023`, `PRD-API-024`, `PRD-API-026`, `PRD-API-027`, `PRD-API-028`, `PRD-API-029`, `PRD-API-030`, `PRD-API-031`, `PRD-API-032`, `PRD-API-034`, `PRD-API-035`, `PRD-API-037`, `PRD-API-040`, `PRD-API-041`, `PRD-API-042`, `PRD-API-043`, `PRD-API-044`, `PRD-API-045`, `PRD-API-046`, `PRD-API-047`, `PRD-API-048`, `PRD-API-049`, `PRD-API-050`, `PRD-API-051`, `PRD-API-052`, `PRD-API-053`, `PRD-API-054`
+**DOC-05** — `PRD-API-015`, `PRD-API-016`, `PRD-API-018`, `PRD-API-022`, `PRD-API-023`, `PRD-API-024`, `PRD-API-026`, `PRD-API-027`, `PRD-API-028`, `PRD-API-029`, `PRD-API-030`, `PRD-API-031`, `PRD-API-032`, `PRD-API-035`, `PRD-API-037`, `PRD-API-040`, `PRD-API-041`, `PRD-API-042`, `PRD-API-043`, `PRD-API-044`, `PRD-API-045`, `PRD-API-047`, `PRD-API-048`, `PRD-API-049`, `PRD-API-050`, `PRD-API-051`, `PRD-API-052`, `PRD-API-053`, `PRD-API-054`
 
-**DOC-06** — `SEC-SBM-003`, `SEC-SBM-004`, `SEC-SEC-002`, `SEC-SEC-007`, `SEC-SEC-008`, `SEC-SEC-010`, `SEC-SEC-014`, `SEC-SEC-015`, `SEC-SEC-018`, `SEC-SEC-019`, `SEC-SEC-020`, `SEC-SEC-021`, `SEC-SEC-022`, `SEC-SEC-023`, `SEC-SEC-024`, `SEC-SEC-025`, `SEC-SEC-026`, `SEC-SEC-027`, `SEC-SEC-028`, `SEC-SEC-029`, `SEC-SEC-030`, `SEC-SEC-031`, `SEC-SEC-032`, `SEC-SEC-033`, `SEC-SEC-034`, `SEC-SEC-035`, `SEC-SEC-036`, `SEC-SEC-037`, `SEC-SEC-038`, `SEC-SEC-039`, `SEC-SEC-040`, `SEC-SEC-041`, `SEC-SEC-042`, `SEC-SEC-043`, `SEC-SEC-044`, `SEC-SEC-045`, `SEC-SEC-046`, `SEC-SEC-047`, `SEC-SEC-048`, `SEC-SEC-049`, `SEC-SEC-050`, `SEC-SEC-051`, `SEC-SEC-052`, `SEC-SEC-053`, `SEC-SEC-055`, `SEC-SEC-056`, `SEC-SEC-058`, `SEC-SEC-059`, `SEC-SEC-060`, `SEC-SEC-063`, `SEC-SEC-064`, `SEC-SEC-065`, `SEC-SEC-066`, `SEC-SEC-067`, `SEC-SEC-068`
+**DOC-06** — `SEC-SBM-003`, `SEC-SBM-004`, `SEC-SEC-007`, `SEC-SEC-014`, `SEC-SEC-015`, `SEC-SEC-018`, `SEC-SEC-019`, `SEC-SEC-020`, `SEC-SEC-021`, `SEC-SEC-022`, `SEC-SEC-026`, `SEC-SEC-027`, `SEC-SEC-028`, `SEC-SEC-029`, `SEC-SEC-030`, `SEC-SEC-031`, `SEC-SEC-033`, `SEC-SEC-034`, `SEC-SEC-035`, `SEC-SEC-036`, `SEC-SEC-037`, `SEC-SEC-038`, `SEC-SEC-039`, `SEC-SEC-040`, `SEC-SEC-041`, `SEC-SEC-042`, `SEC-SEC-043`, `SEC-SEC-044`, `SEC-SEC-045`, `SEC-SEC-046`, `SEC-SEC-048`, `SEC-SEC-049`, `SEC-SEC-050`, `SEC-SEC-051`, `SEC-SEC-052`, `SEC-SEC-053`, `SEC-SEC-055`, `SEC-SEC-056`, `SEC-SEC-058`, `SEC-SEC-059`, `SEC-SEC-060`, `SEC-SEC-063`, `SEC-SEC-064`, `SEC-SEC-065`, `SEC-SEC-066`, `SEC-SEC-067`, `SEC-SEC-068`
 
-**DOC-07** — `SEC-AUZ-001`, `SEC-AUZ-002`, `SEC-AUZ-004`, `SEC-AUZ-005`, `SEC-AUZ-006`, `SEC-AUZ-007`, `SEC-AUZ-008`, `SEC-AUZ-009`, `SEC-AUZ-011`, `SEC-AUZ-012`, `SEC-AUZ-019`, `SEC-AUZ-023`, `SEC-AUZ-030`, `SEC-AUZ-032`, `SEC-AUZ-034`, `SEC-AUZ-040`, `SEC-AUZ-041`, `SEC-AUZ-042`, `SEC-AUZ-044`, `SEC-AUZ-045`, `SEC-AUZ-046`, `SEC-AUZ-048`, `SEC-AUZ-049`, `SEC-AUZ-050`
+**DOC-07** — `SEC-AUZ-002`, `SEC-AUZ-004`, `SEC-AUZ-005`, `SEC-AUZ-006`, `SEC-AUZ-007`, `SEC-AUZ-008`, `SEC-AUZ-009`, `SEC-AUZ-011`, `SEC-AUZ-012`, `SEC-AUZ-019`, `SEC-AUZ-023`, `SEC-AUZ-030`, `SEC-AUZ-032`, `SEC-AUZ-034`, `SEC-AUZ-040`, `SEC-AUZ-041`, `SEC-AUZ-042`, `SEC-AUZ-044`, `SEC-AUZ-045`, `SEC-AUZ-046`, `SEC-AUZ-048`, `SEC-AUZ-049`, `SEC-AUZ-050`, `SEC-AUZ-052`, `SEC-AUZ-053`, `SEC-AUZ-054`, `SEC-AUZ-055`
 
 **DOC-08** — `INT-UIX-002`, `INT-UIX-007`, `INT-UIX-010`, `INT-UIX-012`, `INT-UIX-013`, `PRD-UIX-001`, `PRD-UIX-002`, `PRD-UIX-009`, `PRD-UIX-010`, `PRD-UIX-012`, `PRD-UIX-017`, `PRD-UIX-018`, `PRD-UIX-028`, `PRD-UIX-030`
 
 **DOC-09** — `PRD-WRK-045`
 
-**DOC-10** — `PRD-AIC-022`, `PRD-AIC-023`, `PRD-AIC-024`, `PRD-AIC-025`, `PRD-AIC-026`, `PRD-AIC-027`, `PRD-AIC-028`, `PRD-AIC-029`, `PRD-AIC-030`, `PRD-AIC-031`, `PRD-AIC-032`, `PRD-AIC-033`, `PRD-AIC-035`, `PRD-AIC-036`, `PRD-AIC-037`, `PRD-AIC-039`, `PRD-AIC-040`, `PRD-AIC-041`, `PRD-AIC-042`, `PRD-AIC-043`, `PRD-AIC-044`, `PRD-AIC-045`, `PRD-AIC-046`, `PRD-AIC-047`, `PRD-AIC-048`, `PRD-AIC-051`, `PRD-AIC-053`, `PRD-AIC-054`, `PRD-AIC-055`, `PRD-AIC-056`
+**DOC-10** — `PRD-AIC-022`, `PRD-AIC-024`, `PRD-AIC-027`, `PRD-AIC-028`, `PRD-AIC-029`, `PRD-AIC-031`, `PRD-AIC-039`, `PRD-AIC-040`, `PRD-AIC-041`, `PRD-AIC-042`, `PRD-AIC-046`, `PRD-AIC-047`, `PRD-AIC-048`
 
 **DOC-11** — `PRD-ING-019`, `PRD-ING-022`, `PRD-ING-023`, `PRD-ING-026`, `PRD-ING-028`, `PRD-ING-034`, `PRD-ING-035`, `PRD-ING-036`, `PRD-ING-037`, `PRD-ING-042`, `PRD-ING-043`, `PRD-ING-044`, `PRD-ING-045`, `PRD-ING-047`, `PRD-ING-053`, `PRD-ING-054`, `PRD-ING-055`, `PRD-ING-056`, `PRD-ING-057`, `PRD-ING-058`, `PRD-ING-059`
 
-**DOC-12** — `PRD-DSH-018`, `PRD-DSH-019`, `PRD-DSH-020`, `PRD-DSH-022`, `PRD-DSH-023`, `PRD-DSH-024`, `PRD-DSH-026`, `PRD-DSH-027`, `PRD-DSH-029`, `PRD-DSH-030`, `PRD-DSH-032`, `PRD-DSH-033`, `PRD-DSH-035`, `PRD-DSH-036`, `PRD-DSH-037`, `PRD-DSH-038`, `PRD-DSH-039`, `PRD-DSH-040`, `PRD-DSH-044`, `PRD-DSH-045`, `PRD-DSH-047`, `PRD-DSH-048`
+**DOC-12** — `PRD-DSH-018`, `PRD-DSH-019`, `PRD-DSH-020`, `PRD-DSH-022`, `PRD-DSH-023`, `PRD-DSH-024`, `PRD-DSH-026`, `PRD-DSH-027`, `PRD-DSH-029`, `PRD-DSH-030`, `PRD-DSH-032`, `PRD-DSH-033`, `PRD-DSH-035`, `PRD-DSH-036`, `PRD-DSH-037`, `PRD-DSH-038`, `PRD-DSH-039`, `PRD-DSH-040`, `PRD-DSH-044`
 
-**DOC-13** — `PRD-NTF-015`, `PRD-NTF-016`, `PRD-NTF-017`, `PRD-NTF-018`, `PRD-NTF-019`, `PRD-NTF-021`, `PRD-NTF-022`, `PRD-NTF-032`, `PRD-NTF-033`, `PRD-NTF-034`, `PRD-NTF-035`, `PRD-NTF-041`, `PRD-NTF-042`, `PRD-NTF-043`, `PRD-NTF-044`, `PRD-NTF-045`
+**DOC-13** — `PRD-NTF-016`, `PRD-NTF-022`, `PRD-NTF-033`, `PRD-NTF-034`, `PRD-NTF-035`, `PRD-NTF-041`, `PRD-NTF-044`, `PRD-NTF-045`
 
-**DOC-14** — `SEC-AUD-003`, `SEC-AUD-005`, `SEC-AUD-007`, `SEC-AUD-008`, `SEC-AUD-009`, `SEC-AUD-017`, `SEC-AUD-021`, `SEC-AUD-022`, `SEC-AUD-023`, `SEC-AUD-024`, `SEC-AUD-025`, `SEC-AUD-026`, `SEC-AUD-027`, `SEC-AUD-028`, `SEC-AUD-029`, `SEC-AUD-030`, `SEC-AUD-031`, `SEC-AUD-032`, `SEC-AUD-033`, `SEC-AUD-035`, `SEC-AUD-036`, `SEC-AUD-037`, `SEC-AUD-038`, `SEC-AUD-039`, `SEC-AUD-040`
+**DOC-14** — `SEC-AUD-003`, `SEC-AUD-005`, `SEC-AUD-007`, `SEC-AUD-008`, `SEC-AUD-017`, `SEC-AUD-021`, `SEC-AUD-022`, `SEC-AUD-023`, `SEC-AUD-024`, `SEC-AUD-025`, `SEC-AUD-026`, `SEC-AUD-027`, `SEC-AUD-028`, `SEC-AUD-029`, `SEC-AUD-030`, `SEC-AUD-031`, `SEC-AUD-032`, `SEC-AUD-033`, `SEC-AUD-035`, `SEC-AUD-036`, `SEC-AUD-037`, `SEC-AUD-038`, `SEC-AUD-039`, `SEC-AUD-040`
 
-**DOC-15** — `OPS-DEP-003`, `OPS-DEP-004`, `OPS-DEP-013`, `OPS-DEP-015`, `OPS-DEP-018`, `OPS-DEP-019`, `OPS-DEP-021`, `OPS-DEP-022`, `OPS-DEP-023`, `OPS-DEP-025`, `OPS-DEP-027`, `OPS-DEP-028`, `OPS-DEP-029`, `OPS-DEP-030`, `OPS-DEP-033`, `OPS-DEP-036`, `OPS-DEP-037`, `OPS-DEP-038`, `OPS-DEP-039`, `OPS-DEP-042`, `OPS-DEP-043`, `OPS-DEP-044`, `OPS-DEP-046`, `OPS-DEP-047`
+**DOC-15** — `OPS-DEP-004`, `OPS-DEP-013`, `OPS-DEP-018`, `OPS-DEP-021`, `OPS-DEP-022`, `OPS-DEP-023`, `OPS-DEP-025`, `OPS-DEP-027`, `OPS-DEP-028`, `OPS-DEP-030`, `OPS-DEP-033`, `OPS-DEP-036`, `OPS-DEP-037`, `OPS-DEP-038`, `OPS-DEP-039`, `OPS-DEP-042`, `OPS-DEP-043`, `OPS-DEP-044`, `OPS-DEP-046`, `OPS-DEP-047`
 
-**DOC-16** — `TST-AIC-001`, `TST-AIC-002`, `TST-DEP-002`, `TST-ING-001`, `TST-INT-001`, `TST-INT-002`, `TST-PLT-001`, `TST-PLT-003`, `TST-PLT-006`, `TST-PLT-007`, `TST-PLT-011`, `TST-PLT-012`, `TST-SEC-002`, `TST-SEC-003`, `TST-TEN-002`, `TST-TEN-003`, `TST-WRK-001`, `TST-WRK-002`
+**DOC-16** — `TST-AIC-001`, `TST-DEP-002`, `TST-INT-001`, `TST-INT-002`, `TST-PLT-001`, `TST-PLT-003`, `TST-PLT-006`, `TST-PLT-007`, `TST-PLT-011`, `TST-PLT-012`, `TST-SEC-002`, `TST-SEC-003`, `TST-TEN-002`, `TST-TEN-003`, `TST-WRK-001`, `TST-WRK-002`
 
 **DOC-17** — `PRD-PLT-008`, `PRD-PLT-011`
 
-**DOC-21** — `PRD-CON-015`, `PRD-CON-017`, `PRD-CON-018`, `PRD-CON-019`, `PRD-CON-020`, `PRD-CON-021`, `PRD-CON-022`, `PRD-CON-023`, `PRD-CON-025`, `PRD-CON-035`, `PRD-CON-039`, `PRD-CON-041`, `PRD-CON-043`, `PRD-CON-044`, `PRD-CON-045`, `PRD-CON-046`, `PRD-CON-047`, `PRD-CON-048`, `PRD-CON-049`, `PRD-CON-050`, `PRD-CON-051`, `PRD-CON-052`, `PRD-CON-054`, `PRD-CON-055`
+**DOC-21** — `PRD-CON-018`, `PRD-CON-039`, `PRD-CON-041`, `PRD-CON-046`, `PRD-CON-047`, `PRD-CON-048`, `PRD-CON-049`, `PRD-CON-050`, `PRD-CON-051`, `PRD-CON-052`, `PRD-CON-055`
 
-**DOC-22** — `PRD-SBM-025`, `PRD-SBM-026`, `PRD-SBM-027`, `PRD-SBM-028`, `PRD-SBM-029`, `PRD-SBM-030`, `PRD-SBM-031`, `PRD-SBM-033`, `PRD-SBM-034`, `PRD-SBM-035`, `PRD-SBM-042`, `PRD-SBM-043`, `PRD-SBM-045`, `PRD-SBM-047`, `PRD-SBM-048`, `PRD-SBM-049`, `PRD-SBM-051`, `PRD-SBM-054`, `PRD-SBM-059`, `PRD-SBM-061`, `PRD-SBM-062`, `PRD-SBM-064`
+**DOC-22** — `PRD-SBM-025`, `PRD-SBM-026`, `PRD-SBM-027`, `PRD-SBM-028`, `PRD-SBM-029`, `PRD-SBM-030`, `PRD-SBM-031`, `PRD-SBM-033`, `PRD-SBM-034`, `PRD-SBM-042`, `PRD-SBM-043`, `PRD-SBM-045`, `PRD-SBM-047`, `PRD-SBM-048`, `PRD-SBM-049`, `PRD-SBM-051`, `PRD-SBM-054`, `PRD-SBM-059`, `PRD-SBM-061`, `PRD-SBM-062`, `PRD-SBM-064`
 
 **DOC-24** — `SEC-TEN-001`, `SEC-TEN-002`, `SEC-TEN-009`, `SEC-TEN-010`, `SEC-TEN-013`, `SEC-TEN-014`, `SEC-TEN-015`, `SEC-TEN-016`, `SEC-TEN-017`, `SEC-TEN-018`, `SEC-TEN-019`, `SEC-TEN-020`, `SEC-TEN-021`, `SEC-TEN-022`, `SEC-TEN-023`, `SEC-TEN-024`, `SEC-TEN-025`, `SEC-TEN-026`, `SEC-TEN-027`, `SEC-TEN-028`, `SEC-TEN-029`, `SEC-TEN-031`, `SEC-TEN-032`, `SEC-TEN-033`, `SEC-TEN-034`, `SEC-TEN-035`, `SEC-TEN-036`, `SEC-TEN-037`, `SEC-TEN-038`, `SEC-TEN-039`, `SEC-TEN-040`, `SEC-TEN-041`, `SEC-TEN-042`, `SEC-TEN-043`, `SEC-TEN-044`, `SEC-TEN-045`, `SEC-TEN-046`, `SEC-TEN-047`, `SEC-TEN-048`
 
@@ -191,15 +192,15 @@ A gap is closed by writing the test, never by weakening the requirement.
 
 ## Backward: zero schema objects or API operations tracing to no requirement
 
-167 schema objects across the thirteen migrations:
+253 schema objects across the thirteen migrations:
 
-- 89 cite a requirement identifier in their own definition block
-- 51 cite a DOC section but no requirement identifier — traced to the design or to an invariant, not to a requirement
-- 27 cite neither
+- 128 cite a requirement identifier in their own definition block
+- 55 cite a DOC section but no requirement identifier — traced to the design or to an invariant, not to a requirement
+- 70 cite neither
 
-**FAIL** — 27 schema object(s) trace to nothing.
+**FAIL** — 70 schema object(s) trace to nothing.
 
-17 of them explain themselves in prose and name no traceable identifier: the trace exists in the comment and in the author's head, and not in anything a tool or a descoping decision can follow. That is a citation gap. The remaining 10 carry neither, which is the undocumented functionality PRD-PLT-012 is about — 'attack surface and test burden nobody agreed to accept'.
+51 of them explain themselves in prose and name no traceable identifier: the trace exists in the comment and in the author's head, and not in anything a tool or a descoping decision can follow. That is a citation gap. The remaining 19 carry neither, which is the undocumented functionality PRD-PLT-012 is about — 'attack surface and test burden nobody agreed to accept'.
 
 | Object | Kind | Migration | Has a prose rationale |
 |---|---|---|---|
@@ -207,14 +208,48 @@ A gap is closed by writing the test, never by weakening the requirement.
 | `assessment_scope_asset` | table | `V010__assessment_and_intake.sql` | NO |
 | `checklist_item` | table | `V010__assessment_and_intake.sql` | NO |
 | `request_group` | table | `V010__assessment_and_intake.sql` | NO |
+| `request_board` | view | `V022__request_board.sql` | yes |
+| `application_full_review` | view | `V024__assessment_trigger_and_cadence.sql` | yes |
+| `application_review_cadence` | view | `V024__assessment_trigger_and_cadence.sql` | yes |
+| `assessment_trigger` | table | `V024__assessment_trigger_and_cadence.sql` | yes |
+| `request_board` | view | `V024__assessment_trigger_and_cadence.sql` | yes |
+| `application_full_review` | view | `V026__terminal_disposition.sql` | NO |
+| `application_review_cadence` | view | `V026__terminal_disposition.sql` | yes |
+| `application_full_review` | view | `V028__state_join_by_active_definition.sql` | yes |
+| `application_review_cadence` | view | `V028__state_join_by_active_definition.sql` | NO |
+| `request_board` | view | `V028__state_join_by_active_definition.sql` | NO |
+| `assessment_request_participant` | table | `V031__request_participant.sql` | yes |
+| `request_board` | view | `V048__board_shows_requested_scope.sql` | yes |
+| `assessment_plan_window` | table | `V070__assessment_plan_window.sql` | yes |
+| `application_review_cadence` | view | `V071__review_attestation.sql` | yes |
 | `ai_suggestion` | table | `V019__application_composition.sql` | yes |
 | `asset_attribute_definition` | table | `V019__application_composition.sql` | yes |
 | `asset_composition` | view | `V019__application_composition.sql` | yes |
-| `asset_finding_tally` | view | `V019__application_composition.sql` | yes |
+| `asset_finding_tally` | view | `V019__application_composition.sql` | NO |
 | `application_assurance` | view | `V020__assurance_coverage.sql` | yes |
 | `asset_assurance` | view | `V020__assurance_coverage.sql` | yes |
 | `asset_remediation` | view | `V020__assurance_coverage.sql` | yes |
+| `application_assurance` | view | `V035__application_finding_linkage.sql` | NO |
+| `application_finding` | view | `V035__application_finding_linkage.sql` | yes |
+| `application_request` | view | `V035__application_finding_linkage.sql` | yes |
+| `asset_assurance` | view | `V035__application_finding_linkage.sql` | yes |
+| `asset_finding_link` | view | `V035__application_finding_linkage.sql` | yes |
+| `asset_finding_tally` | view | `V035__application_finding_linkage.sql` | yes |
+| `asset_remediation` | view | `V035__application_finding_linkage.sql` | yes |
+| `asset_request_link` | view | `V035__application_finding_linkage.sql` | yes |
+| `asset_endpoint_environment` | table | `V069__endpoint_environment_catalogue.sql` | yes |
+| `assessor_team` | table | `V034__assessor_team.sql` | yes |
 | `reject_component_entry_update` | function | `V011__composition_analysis.sql` | yes |
+| `advisory` | table | `V036__advisory_and_dependency_graph.sql` | yes |
+| `asset_component` | view | `V036__advisory_and_dependency_graph.sql` | NO |
+| `asset_component_advisory` | view | `V036__advisory_and_dependency_graph.sql` | yes |
+| `asset_dependency_posture` | view | `V036__advisory_and_dependency_graph.sql` | yes |
+| `component_advisory` | table | `V036__advisory_and_dependency_graph.sql` | yes |
+| `application_dependency_posture` | view | `V039__advisory_detail.sql` | NO |
+| `asset_component_advisory` | view | `V039__advisory_detail.sql` | NO |
+| `asset_dependency_posture` | view | `V039__advisory_detail.sql` | NO |
+| `rescan_queue` | view | `V042__rescan_schedule.sql` | yes |
+| `rescan_schedule` | table | `V042__rescan_schedule.sql` | yes |
 | `breach_corpus_size` | function | `V015__identity_and_access.sql` | NO |
 | `mfa_enrolment` | table | `V015__identity_and_access.sql` | yes |
 | `mfa_recovery_code` | table | `V015__identity_and_access.sql` | NO |
@@ -222,18 +257,27 @@ A gap is closed by writing the test, never by weakening the requirement.
 | `role_assignment` | table | `V015__identity_and_access.sql` | yes |
 | `role_permission` | table | `V015__identity_and_access.sql` | NO |
 | `principal_administration` | view | `V016__step_up_and_administration.sql` | yes |
+| `identity_provider_group_role` | table | `V074__federated_identity.sql` | yes |
 | `rm_activity_timeline` | table | `V012__read_models.sql` | yes |
+| `alert_delivery` | table | `V040__advisory_webhook.sql` | yes |
 | `business_calendar_holiday` | table | `V008__risk_and_service_levels.sql` | NO |
 | `escalation_step` | table | `V008__risk_and_service_levels.sql` | yes |
 | `exceptions_without_controls_declaration` | function | `V007__risk_exception.sql` | yes |
+| `cwe` | table | `V052__finding_classification.sql` | yes |
+| `executive_risk_category` | table | `V052__finding_classification.sql` | yes |
+| `finding_cwe` | table | `V052__finding_classification.sql` | yes |
+| `owasp_top10_2025` | table | `V052__finding_classification.sql` | yes |
+| `finding_transition` | table | `V055__finding_lifecycle.sql` | yes |
 | `comment_revision` | table | `V009__work_management.sql` | NO |
 | `keep_read_mark_monotonic` | function | `V009__work_management.sql` | yes |
 | `links_without_inverse` | function | `V009__work_management.sql` | yes |
 | `work_item_watcher` | table | `V009__work_management.sql` | NO |
+| `prose_attachment` | table | `V023__prose_attachment.sql` | yes |
+| `establish_tenant_session` | function | `V064__tenant_business_calendar.sql` | yes |
 
 Closing these means adding the requirement identifier the object already implements, in the migration that defines it. It is not closed here: a citation added to satisfy a gate on the day the gate was written is the weakest evidence available, and it belongs to whoever can confirm the mapping against the owning document.
 
-<details><summary>Traced to a design section or an invariant but not to a requirement (51)</summary>
+<details><summary>Traced to a design section or an invariant but not to a requirement (55)</summary>
 
 These are not gate failures. They are the weaker trace: a reader can find the design that specifies the object but not the requirement that obliges it, so a descoping decision cannot see what the object is for.
 
@@ -255,6 +299,8 @@ These are not gate failures. They are the weaker trace: a reader can find the de
 | `reject_published_checklist_change` | function | INV-ASM-17 |
 | `requests_failing_two_account_rule` | function | INV-ASM-02 |
 | `reject_request_transition_rewrite` | function | INV-WRK-03 |
+| `review_completion_state` | table | INV-WRK-01 |
+| `assessment_request_scope_asset` | table | INV-ASM-10 |
 | `asset_external_identifier` | table | DOC-04 section 11.3.5 |
 | `asset_merge` | table | DOC-04 section 11.3.7 |
 | `asset_relationship` | table | DOC-03 section 8.3 |
@@ -265,6 +311,7 @@ These are not gate failures. They are the weaker trace: a reader can find the de
 | `reject_asset_type_change` | function | DOC-03 section 8.1 |
 | `reject_edge_reopen` | function | INV-AST-16 |
 | `reject_manual_confirmation_advance` | function | DOC-04 section 11.3.2 |
+| `snapshot_scan` | table | INV-SBM-01 |
 | `finding_fingerprint_input` | table | DOC-04 section 13.3 |
 | `findings_without_retained_inputs` | function | INV-VUL-04 |
 | `reject_reported_severity_change` | function | INV-VUL-08 |
@@ -275,6 +322,7 @@ These are not gate failures. They are the weaker trace: a reader can find the de
 | `org_node_type` | table | DOC-04 section 11.2.1 |
 | `reject_code_change` | function | DOC-04 section 11.2.1 |
 | `scope_descriptor_gaps` | function | INV-ORG-10 |
+| `reject_unsupported_reparent` | function | INV-ORG-13 |
 | `service_level_policy` | table | DOC-04 section 18.3 |
 | `unattributed_pause_intervals` | function | DOC-04 section 18.2. |
 | `assert_exception_approver_differs` | function | DOC-07 section 15.1 |
@@ -293,115 +341,275 @@ These are not gate failures. They are the weaker trace: a reader can find the de
 
 </details>
 
-104 operation(s) registered in `PlatformOperations`.
+264 operation(s) registered in `PlatformOperations`.
 
 **PASS** — every registered operation cites a requirement in its block.
 
 | Operation | Traced to |
 |---|---|
-| `POST /ui/organization` | `PRD-ORG-001`, `SEC-AUZ-010`, `SEC-AUZ-016` |
-| `POST /ui/board/{id}/findings/{findingId}/comments` | `PRD-VUL-001`, `PRD-ASM-003`, `SEC-AUZ-017` |
-| `GET /ui/users/{id}` | `PRD-AUZ-001`, `PRD-AUZ-002`, `SEC-AUZ-017` |
-| `POST /ui/roles/{id}` | `PRD-AUZ-001`, `SEC-SEC-004` |
-| `GET /ui/step-up` | `PRD-IAM-003`, `SEC-SEC-004` |
-| `POST /ui/users/{id}/roles` | `PRD-AUZ-002`, `PRD-AUZ-003`, `SEC-SEC-004` |
-| `GET /ui/organization` | `PRD-ORG-001`, `SEC-AUZ-010`, `SEC-AUZ-016` |
-| `GET /ui` | `PRD-API-036`, `INT-UIX-003` |
-| `GET /ui/users` | `PRD-AUZ-001`, `PRD-AUZ-002`, `SEC-AUZ-017` |
-| `GET /ui/assets` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016` |
-| `POST /ui/users/{id}/reset` | `SEC-SEC-016`, `SEC-SEC-004` |
-| `GET /ui/applications/new` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016`, `SEC-AUZ-017` |
-| `GET /ui/requests/{id}` | `PRD-PTR-021`, `SEC-AUZ-017` |
-| `GET /api/v1/org-nodes` | `PRD-ORG-001`, `SEC-AUZ-010`, `SEC-AUZ-016` |
-| `GET /ui/sign-in` | `SEC-SEC-005`, `SEC-SEC-013`, `SEC-TEN-004` |
-| `POST /ui/account` | `SEC-SEC-012`, `PRD-IAM-007` |
-| `POST /api/v1/requests/{id}/transitions` | `PRD-WRK-031`, `PRD-WRK-032`, `PRD-WRK-036` |
-| `POST /ui/roles/{id}/restore` | `PRD-AUZ-001`, `SEC-SEC-004` |
-| `POST /ui/applications/{id}` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016`, `SEC-AUZ-017` |
-| `POST /api/v1/sbom-submissions` | `PRD-API-038`, `PRD-API-039`, `PRD-SBM-037` |
-| `GET /ui/applications/{id}/components/{componentId}` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016`, `SEC-AUZ-017` |
-| `POST /ui/account/sessions/revoke` | `SEC-SEC-012`, `SEC-SEC-011` |
-| `POST /ui/board/{id}/findings/{findingId}` | `PRD-VUL-001`, `PRD-ASM-003`, `SEC-AUZ-017` |
-| `POST /ui/applications/{id}/retire` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016`, `SEC-AUZ-017` |
-| `GET /api/v1/asset-types` | `PRD-AST-001`, `PRD-AST-002` |
-| `POST /ui/requests/{id}/transitions` | `PRD-WRK-031`, `PRD-WRK-032`, `PRD-WRK-036` |
-| `PATCH /api/v1/org-nodes/{id}` | `PRD-ORG-001`, `SEC-AUZ-010`, `SEC-AUZ-016` |
-| `POST /api/v1/assets` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016` |
-| `POST /ui/board/{id}/findings` | `PRD-VUL-001`, `PRD-ASM-003`, `SEC-AUZ-017` |
-| `GET /ui/change-password` | `PRD-IAM-007`, `SEC-SEC-006` |
-| `GET /ui/org-nodes` | `PRD-ORG-001`, `SEC-AUZ-010`, `SEC-AUZ-016` |
-| `GET /ui/sign-out` | `SEC-SEC-011`, `SEC-SEC-012` |
-| `GET /ui/composition` | `PRD-SBM-056`, `PRD-SBM-032` |
-| `PATCH /api/v1/asset-types/{id}` | `PRD-AST-001`, `PRD-AST-002` |
-| `POST /api/v1/org-node-types` | `CFG-ORG-001`, `PRD-ORG-004` |
-| `GET /ui/applications/{id}/components/new` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016`, `SEC-AUZ-017` |
-| `POST /ui/organization/{id}/deprecate` | `PRD-ORG-001`, `SEC-AUZ-010`, `SEC-AUZ-016` |
-| `GET /ui/mfa-enrol` | `SEC-SEC-003`, `PRD-IAM-002` |
-| `POST /ui/board/{id}/transitions` | `PRD-WRK-031`, `PRD-WRK-032`, `PRD-ASM-003` |
-| `POST /ui/users/{id}/roles/revoke` | `PRD-AUZ-002`, `PRD-AUZ-003`, `SEC-SEC-004` |
-| `POST /ui/board/{id}/findings/{findingId}/close` | `PRD-VUL-001`, `SEC-AUZ-017` |
-| `POST /ui/applications/{id}/components/{componentId}` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016`, `SEC-AUZ-017` |
-| `GET /api/v1/assets/{id}` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016` |
-| `GET /ui/mfa` | `SEC-SEC-003`, `SEC-SEC-009` |
-| `GET /api/v1/findings` | `PRD-VUL-001`, `SEC-AUZ-016` |
-| `GET /ui/account` | `SEC-SEC-012`, `PRD-IAM-007` |
-| `POST /ui/board/{id}/comments` | `PRD-ASM-003`, `PRD-PTR-021`, `SEC-AUZ-016` |
-| `POST /ui/forgot-password` | `SEC-SEC-016` |
-| `GET /ui/applications/{id}` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016`, `SEC-AUZ-017` |
-| `POST /ui/applications/{id}/components` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016`, `SEC-AUZ-017` |
-| `GET /ui/roles/{id}` | `PRD-AUZ-001`, `SEC-SEC-004` |
-| `GET /` | `PRD-API-036` |
-| `GET /ui/security-policy` | `PRD-IAM-007`, `PRD-IAM-006`, `SEC-SEC-006` |
-| `GET /ui/workload` | `PRD-CAP-005`, `PRD-CAP-008`, `PRD-CAP-013`, `PRD-CAP-014` |
-| `POST /ui/step-up` | `PRD-IAM-003`, `SEC-SEC-004` |
-| `POST /ui/roles` | `PRD-AUZ-001`, `SEC-SEC-004` |
-| `GET /ui/board` | `PRD-ASM-003`, `PRD-PTR-021`, `SEC-AUZ-016` |
-| `POST /ui/applications/{id}/components/{componentId}/detach` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016`, `SEC-AUZ-017` |
-| `POST /ui/board/{id}/findings/{findingId}/accept` | `PRD-VUL-001`, `SEC-SEC-004` |
-| `GET /ui/` | `PRD-API-036`, `INT-UIX-003` |
-| `GET /ui/roles` | `PRD-AUZ-001`, `SEC-SEC-004` |
-| `GET /ui/components` | `PRD-AST-001`, `PRD-AST-005`, `SEC-AUZ-016` |
-| `GET /api/v1/criticality-tiers/{id}` | `CFG-ORG-001`, `PRD-ORG-006` |
-| `POST /ui/applications` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016`, `SEC-AUZ-017` |
-| `GET /ui/findings` | `PRD-VUL-001`, `SEC-AUZ-016` |
-| `POST /ui/board/{id}/assign` | `PRD-WRK-031`, `PRD-WRK-032`, `PRD-ASM-003` |
-| `PATCH /api/v1/findings/{id}` | `PRD-VUL-001`, `SEC-AUZ-016` |
-| `POST /ui/mfa-enrol` | `SEC-SEC-003`, `PRD-IAM-002` |
-| `POST /ui/roles/{id}/delete` | `PRD-AUZ-001`, `SEC-SEC-004` |
-| `GET /api/v1/requests/{id}/transitions` | `PRD-WRK-031`, `PRD-WRK-032`, `PRD-WRK-036` |
-| `POST /ui/sign-in` | `SEC-SEC-005`, `SEC-SEC-013`, `SEC-TEN-004` |
-| `GET /ui/applications` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016`, `SEC-AUZ-017` |
-| `POST /ui/sign-out` | `SEC-SEC-011`, `SEC-SEC-012` |
-| `GET /api/v1/coverage-states` | `PRD-SBM-056`, `PRD-SBM-032` |
-| `GET /ui/org-node-types` | `CFG-ORG-001`, `PRD-ORG-004` |
-| `GET /api/v1/assets` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016` |
-| `GET /ui/style.css` | `PRD-UIX-006`, `INT-UIX-004` |
-| `GET /api/v1/org-node-types` | `CFG-ORG-001`, `PRD-ORG-004` |
-| `GET /api/v1/findings/{id}` | `PRD-VUL-001`, `SEC-AUZ-016` |
+| `GET /board/{id}/findings/{findingId}` | `PRD-VUL-001`, `PRD-ASM-003`, `SEC-AUZ-017` |
+| `GET /app/{a}/{b}/{c}/{d}` | `PRD-API-036`, `INT-UIX-003` |
+| `GET /api/ui/rescan-schedule` | `PRD-SBM-035`, `PRD-SBM-056`, `SEC-AUZ-016` |
+| `GET /roles` | `PRD-AUZ-001`, `SEC-SEC-004` |
+| `GET /api/ui/alerts` | `PRD-NTF-001`, `PRD-SBM-056`, `SEC-AUZ-016` |
+| `GET /api/ui/projects/{id}/posture` | `PRD-AST-001`, `PRD-UIX-011`, `PRD-UIX-022`, `SEC-AUZ-016` |
+| `POST /api/ui/access/users/{id}/break-glass` | `SEC-SEC-002`, `PRD-IAM-007` |
+| `GET /api/ui/projects/{id}` | `PRD-AST-001`, `PRD-AST-005`, `SEC-AUZ-016` |
+| `GET /api/ui/projects` | `PRD-AST-001`, `PRD-AST-005`, `SEC-AUZ-016` |
+| `GET /requests/new` | `PRD-UIX-006`, `INT-UIX-004` |
+| `POST /api/ui/board/{id}/participants` | `PRD-AUZ-002`, `SEC-AUZ-014`, `SEC-AUZ-017` |
+| `GET /guide` | `PRD-PLT-007`, `INT-UIX-008` |
 | `GET /api/v1/asset-types/{id}` | `PRD-AST-001`, `PRD-AST-002` |
-| `POST /ui/roles/{id}/retire` | `PRD-AUZ-001`, `SEC-SEC-004` |
-| `GET /ui/board/{id}` | `PRD-ASM-003`, `PRD-PTR-021`, `SEC-AUZ-016` |
-| `GET /api/v1/criticality-tiers` | `CFG-ORG-001`, `PRD-ORG-006` |
-| `PATCH /api/v1/criticality-tiers/{id}` | `CFG-ORG-001`, `PRD-ORG-006` |
-| `GET /api/v1/requests` | `PRD-PTR-021`, `PRD-ASM-003`, `SEC-AUZ-016` |
-| `GET /ui/forgot-password` | `SEC-SEC-016` |
-| `PATCH /api/v1/org-node-types/{id}` | `CFG-ORG-001`, `PRD-ORG-004` |
-| `GET /api/v1/org-nodes/{id}` | `PRD-ORG-001`, `SEC-AUZ-010`, `SEC-AUZ-016` |
-| `POST /api/v1/org-nodes` | `PRD-ORG-001`, `SEC-AUZ-010`, `SEC-AUZ-016` |
+| `GET /change-password` | `PRD-IAM-007`, `SEC-SEC-006` |
+| `GET /mfa` | `SEC-SEC-003`, `SEC-SEC-009` |
+| `GET /api/v1/findings/{id}` | `PRD-VUL-001`, `SEC-AUZ-016` |
+| `GET /ui/{a}` | `PRD-API-036`, `INT-UIX-003` |
+| `GET /applications/{id}` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016`, `SEC-AUZ-017` |
+| `GET /api/v1/assets/{id}` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016` |
+| `POST /api/ui/projects/{id}/access/revoke` | `PRD-AUZ-002`, `SEC-AUZ-014`, `SEC-AUZ-017` |
+| `GET /api/ui/projects/{id}/access` | `PRD-AUZ-002`, `SEC-AUZ-014`, `SEC-AUZ-017` |
+| `POST /api/ui/projects/{id}/editor` | `PRD-AST-004`, `PRD-AST-014`, `PRD-AST-016`, `SEC-AUZ-017` |
+| `GET /api/ui/projects/{id}/requests` | `PRD-PTR-021`, `PRD-ASM-003`, `SEC-AUZ-017` |
+| `GET /step-up` | `PRD-IAM-003`, `SEC-SEC-004` |
+| `GET /sign-out` | `SEC-SEC-011`, `SEC-SEC-012` |
+| `POST /api/ui/findings/{id}/references` | `PRD-CON-042`, `PRD-CON-045`, `PRD-CON-038` |
+| `GET /sign-in` | `SEC-SEC-005`, `SEC-SEC-013`, `SEC-TEN-004` |
+| `POST /api/ui/account/sessions/revoke` | `SEC-SEC-012`, `SEC-SEC-016` |
+| `POST /api/ui/settings/notification-channels/{id}/transition` | `PRD-NTF-003`, `CFG-NTF-001`, `PRD-CON-017`, `PRD-CON-021` |
+| `POST /api/ui/agents/analyse` | `PRD-AIC-056`, `CFG-AIC-001`, `SEC-AUZ-017` |
+| `GET /api/ui/api-guide` | `PRD-PLT-007`, `INT-UIX-008` |
+| `POST /api/v1/assets` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016` |
+| `GET /api/v1/asset-types` | `PRD-AST-001`, `PRD-AST-002` |
+| `POST /api/v1/finding-imports` | `PRD-ING-024`, `PRD-ING-027`, `PRD-ING-040`, `PRD-ING-041` |
+| `POST /api/ui/service-credentials/{id}/revoke` | `PRD-IAM-003`, `PRD-AUZ-002`, `SEC-SEC-004` |
+| `GET /app.js` | `PRD-UIX-013`, `INT-UIX-003` |
+| `POST /api/ui/roles/{id}/retire` | `PRD-AUZ-001`, `PRD-AUZ-002`, `PRD-AUZ-006` |
+| `POST /api/ui/findings/classify` | `PRD-VUL-015`, `PRD-AIC-056`, `SEC-AUZ-016` |
+| `GET /analytics` | `PRD-UIX-006`, `INT-UIX-004` |
 | `GET /api/v1/requests/{id}` | `PRD-PTR-021`, `PRD-ASM-003`, `SEC-AUZ-016` |
-| `GET /ui/app.js` | `PRD-UIX-013`, `INT-UIX-003` |
-| `GET /ui/applications/{id}/edit` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016`, `SEC-AUZ-017` |
+| `POST /api/ui/organization/{id}/deprecate` | `PRD-ORG-001`, `PRD-ORG-003`, `PRD-ORG-006`, `SEC-AUZ-017` |
+| `POST /api/ui/applications/{id}/retire` | `PRD-AST-001`, `PRD-AST-012`, `SEC-AUZ-017` |
+| `GET /api/ui/access/identity-providers` | `PRD-IAM-001`, `PRD-CON-010`, `PRD-CON-017`, `PRD-CON-021` |
+| `POST /api/ui/board/{id}/findings/{findingId}/comments` | `PRD-ASM-007`, `PRD-ASM-012`, `PRD-VUL-001` |
+| `GET /api/ui/dependencies/components` | `PRD-SBM-035`, `PRD-SBM-056`, `SEC-AUZ-016` |
+| `GET /security-policy` | `PRD-IAM-007`, `PRD-IAM-006`, `SEC-SEC-006` |
+| `GET /api/ui/composition` | `PRD-SBM-056`, `PRD-SBM-032` |
+| `GET /ui/{a}/{b}` | `PRD-API-036`, `INT-UIX-003` |
+| `GET /api/v1/findings` | `PRD-VUL-001`, `SEC-AUZ-016` |
+| `POST /api/ui/board/{id}/findings` | `PRD-VUL-001`, `PRD-ASM-012`, `SEC-AUZ-017` |
+| `GET /forgot-password` | `SEC-SEC-016` |
+| `POST /api/ui/settings/report-schedules/{id}/recipients` | `PRD-DSH-043`, `PRD-DSH-045` |
+| `POST /api/v1/org-nodes` | `PRD-ORG-001`, `SEC-AUZ-010`, `SEC-AUZ-016` |
+| `GET /access` | `PRD-UIX-006`, `INT-UIX-004` |
+| `POST /api/ui/settings/fields/{id}` | `PRD-AST-014`, `PRD-TEN-004`, `PRD-AUZ-006` |
+| `POST /api/ui/settings/connectors` | `PRD-CON-015`, `PRD-CON-017`, `PRD-CON-021`, `PRD-CON-032`, `PRD-CON-038` |
+| `POST /api/ui/settings/report-schedules/{id}/run` | `PRD-DSH-043`, `PRD-DSH-045` |
+| `GET /account` | `SEC-SEC-012`, `PRD-IAM-007` |
+| `GET /api/ui/teams` | `PRD-CAP-001`, `PRD-CAP-013`, `PRD-AUZ-001` |
 | `POST /api/v1/criticality-tiers` | `CFG-ORG-001`, `PRD-ORG-006` |
-| `GET /api/v1/org-node-types/{id}` | `CFG-ORG-001`, `PRD-ORG-004` |
-| `GET /ui/board/{id}/findings/{findingId}` | `PRD-VUL-001`, `PRD-ASM-003`, `SEC-AUZ-017` |
-| `POST /ui/mfa` | `SEC-SEC-003`, `SEC-SEC-009` |
+| `GET /projects` | `PRD-UIX-006`, `INT-UIX-004` |
+| `POST /api/ui/settings/environments/{id}` | `CFG-AST-002`, `PRD-AST-004`, `PRD-TEN-004`, `PRD-AUZ-006` |
+| `POST /api/ui/ai-providers/{id}/test` | `PRD-AIC-023`, `PRD-AIC-026` |
+| `POST /api/ui/settings/report-schedules/{id}` | `PRD-DSH-043`, `PRD-DSH-045` |
+| `GET /api/ui/settings/report-schedules` | `PRD-DSH-043`, `PRD-DSH-045` |
+| `POST /api/ui/service-credentials` | `PRD-IAM-003`, `PRD-AUZ-002`, `SEC-SEC-004` |
+| `GET /api/ui/overview` | `PRD-UIX-011`, `PRD-UIX-022`, `SEC-AUZ-016` |
+| `GET /api/ui/vulnerabilities/export` | `PRD-VUL-013`, `PRD-VUL-015`, `PRD-UIX-011`, `SEC-AUZ-016` |
+| `POST /change-password` | `PRD-IAM-007`, `SEC-SEC-006` |
+| `GET /style.css` | `PRD-UIX-006`, `INT-UIX-004` |
+| `GET /api/ui/reports/artifacts` | `PRD-DSH-043`, `PRD-DSH-047` |
+| `POST /api/ui/projects/{id}/access` | `PRD-AUZ-002`, `SEC-AUZ-014`, `SEC-AUZ-017` |
+| `GET /api/v1/assets` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016` |
+| `GET /app` | `PRD-API-036`, `INT-UIX-003` |
+| `GET /api/ui/reports/audit-evidence` | `PRD-DSH-046`, `PRD-DSH-047`, `PRD-DSH-048` |
+| `POST /api/ui/ai/evaluate` | `PRD-AIC-049`, `PRD-AIC-050` |
+| `POST /api/ui/settings/report-schedules` | `PRD-DSH-043`, `PRD-DSH-045` |
+| `POST /api/ui/settings/report-schedules/{id}/transition` | `PRD-DSH-043`, `PRD-DSH-045` |
+| `GET /api` | `PRD-API-036` |
+| `GET /api/ui/board/{id}` | `PRD-PTR-021`, `PRD-ASM-003`, `SEC-AUZ-016` |
+| `POST /api/ui/roles/{id}/restore` | `PRD-AUZ-001`, `PRD-AUZ-002`, `PRD-AUZ-006` |
+| `GET /api/v1/coverage-states` | `PRD-SBM-056`, `PRD-SBM-032` |
 | `POST /api/v1/asset-types` | `PRD-AST-001`, `PRD-AST-002` |
-| `GET /ui/overview` | `PRD-UIX-011`, `PRD-UIX-022` |
-| `POST /ui/security-policy` | `PRD-IAM-007`, `PRD-IAM-006`, `SEC-SEC-006` |
-| `POST /ui/organization/{id}` | `PRD-ORG-001`, `SEC-AUZ-010`, `SEC-AUZ-016` |
-| `POST /ui/board/{id}/findings/{findingId}/reopen` | `PRD-VUL-001`, `SEC-SEC-004` |
-| `GET /ui/requests` | `PRD-PTR-021`, `PRD-ASM-003`, `SEC-AUZ-016` |
-| `POST /ui/change-password` | `PRD-IAM-007`, `SEC-SEC-006` |
+| `GET /applications` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016`, `SEC-AUZ-017` |
+| `GET /hosts` | `PRD-UIX-006`, `INT-UIX-004` |
+| `POST /api/ui/roles` | `PRD-AUZ-001`, `PRD-AUZ-002`, `PRD-AUZ-006` |
+| `GET /api/v1/criticality-tiers/{id}` | `CFG-ORG-001`, `PRD-ORG-006` |
+| `GET /api/ui/sbom-submission-health` | `PRD-SBM-024`, `PRD-SBM-032` |
+| `POST /api/ui/alerts/{id}/active` | `PRD-NTF-001`, `PRD-SBM-056`, `SEC-AUZ-016` |
+| `GET /api/ui/account` | `SEC-SEC-012`, `SEC-SEC-016` |
+| `GET /app/{a}/{b}` | `PRD-API-036`, `INT-UIX-003` |
+| `GET /api/ui/roles/{id}` | `PRD-AUZ-001`, `PRD-AUZ-002`, `PRD-AUZ-006` |
+| `GET /organization` | `PRD-ORG-001`, `SEC-AUZ-010`, `SEC-AUZ-016` |
+| `PATCH /api/v1/org-nodes/{id}` | `PRD-ORG-001`, `SEC-AUZ-010`, `SEC-AUZ-016` |
+| `GET /composition` | `PRD-SBM-056`, `PRD-SBM-032` |
+| `GET /api-guide` | `PRD-PLT-007`, `INT-UIX-008` |
+| `POST /api/ui/access/users/{id}/roles` | `PRD-AUZ-001`, `SEC-AUZ-017` |
+| `POST /api/ui/applications/{id}` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016` |
+| `GET /api/ui/dependencies/export` | `PRD-SBM-035`, `PRD-SBM-056`, `SEC-AUZ-016` |
+| `GET /api/ui/settings/connectors/{id}/operations` | `PRD-CON-028`, `PRD-CON-017` |
+| `PUT /api/ui/review-policy/{id}` | `PRD-ASM-002`, `CFG-ASM-001`, `SEC-AUZ-017` |
+| `POST /forgot-password` | `SEC-SEC-016` |
+| `PATCH /api/v1/findings/{id}` | `PRD-VUL-001`, `SEC-AUZ-016` |
+| `POST /api/ui/teams/{id}/retire` | `PRD-CAP-001`, `PRD-CAP-013`, `PRD-AUZ-001` |
+| `POST /api/ui/settings/fields/{id}/lifecycle` | `PRD-AST-014`, `PRD-TEN-004`, `PRD-AUZ-006` |
+| `GET /planning` | `PRD-UIX-006`, `INT-UIX-004` |
+| `POST /api/ui/assessment-plan/windows` | `PRD-ASM-015`, `PRD-ASM-016`, `PRD-ASM-017`, `PRD-ASM-018`, `SEC-AUZ-016` |
+| `GET /api/ui/dependencies/locations` | `PRD-SBM-035`, `PRD-SBM-056`, `SEC-AUZ-016` |
+| `GET /settings` | `PRD-UIX-006`, `INT-UIX-004` |
+| `GET /api/ui/board` | `PRD-PTR-021`, `PRD-ASM-003`, `SEC-AUZ-016` |
+| `GET /api/ui/access` | `PRD-AUZ-001`, `SEC-AUZ-014` |
+| `GET /api/ui/dependencies/tree` | `PRD-SBM-035`, `PRD-SBM-056`, `SEC-AUZ-016` |
+| `POST /api/ui/settings/notification-channels/{id}/verify` | `PRD-NTF-043` |
+| `POST /api/ui/findings/{id}/transition` | `PRD-VUL-001`, `SEC-AUZ-016` |
+| `GET /api/ui/people` | `PRD-PTR-021`, `PRD-ASM-003`, `SEC-AUZ-016` |
+| `POST /api/ui/account/notification-preferences` | `PRD-NTF-019`, `PRD-NTF-020`, `PRD-NTF-021`, `CFG-NTF-001` |
+| `POST /sign-out` | `SEC-SEC-011`, `SEC-SEC-012` |
+| `POST /api/ui/board/{id}/findings/{findingId}` | `PRD-ASM-007`, `PRD-ASM-012`, `PRD-VUL-001` |
+| `GET /api/ui/findings/{id}/lifecycle` | `PRD-VUL-001`, `SEC-AUZ-016` |
+| `GET /overview` | `PRD-UIX-006`, `INT-UIX-004` |
+| `GET /api/ui/session/keepalive` | `SEC-SEC-010`, `SEC-SEC-011` |
+| `GET /api/v1/org-nodes/{id}` | `PRD-ORG-001`, `SEC-AUZ-010`, `SEC-AUZ-016` |
+| `GET /pipeline` | `PRD-UIX-006`, `INT-UIX-004` |
+| `GET /api/ui/dependencies/node` | `PRD-SBM-035`, `PRD-SBM-056`, `SEC-AUZ-016` |
+| `GET /` | `PRD-UIX-006`, `INT-UIX-004` |
+| `GET /app/{a}` | `PRD-API-036`, `INT-UIX-003` |
+| `POST /api/ui/ai-providers` | `PRD-AIC-056`, `CFG-AIC-001`, `SEC-PTR-007`, `SEC-AUZ-017` |
+| `POST /board/{id}/attachments` | `PRD-ASM-007`, `PRD-ASM-012`, `PRD-PTR-005` |
+| `GET /api/ui/findings/{id}/references` | `PRD-CON-042`, `PRD-CON-045`, `PRD-CON-038` |
+| `POST /api/ui/board/{id}/comments` | `PRD-ASM-007`, `PRD-ASM-012`, `PRD-VUL-001` |
+| `GET /api/ui/ai/usage` | `PRD-AIC-043`, `PRD-AIC-044`, `PRD-AIC-053`, `PRD-AIC-054` |
+| `POST /api/ui/applications` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016` |
+| `GET /api/ui/applications/editor` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016` |
+| `POST /api/ui/dependencies/artifact/{id}/retire` | `PRD-AST-001`, `PRD-SBM-056`, `SEC-AUZ-017` |
+| `GET /api/v1/org-node-types` | `CFG-ORG-001`, `PRD-ORG-004` |
+| `POST /api/ui/organization` | `PRD-ORG-001`, `SEC-AUZ-010`, `SEC-AUZ-016` |
+| `POST /api/ui/settings/connectors/{id}` | `PRD-CON-015`, `PRD-CON-017`, `PRD-CON-021`, `PRD-CON-032`, `PRD-CON-038` |
+| `GET /api/ui/settings/environments` | `CFG-AST-002`, `PRD-AST-004`, `PRD-TEN-004`, `PRD-AUZ-006` |
+| `POST /api/ui/settings/connectors/{id}/transition` | `PRD-CON-019`, `PRD-CON-020`, `PRD-CON-035` |
+| `POST /api/ui/settings/notification-channels/{id}` | `PRD-NTF-003`, `CFG-NTF-001`, `PRD-CON-017`, `PRD-CON-021` |
+| `POST /api/ui/board/{id}/assign` | `PRD-PTR-021`, `PRD-ASM-003`, `SEC-AUZ-016` |
+| `POST /api/ui/settings/fields` | `PRD-AST-014`, `PRD-TEN-004`, `PRD-AUZ-006` |
+| `POST /api/ui/settings/notification-channels` | `PRD-NTF-003`, `CFG-NTF-001`, `PRD-CON-017`, `PRD-CON-021` |
+| `POST /api/ui/organization/{id}` | `PRD-ORG-001`, `PRD-ORG-003`, `PRD-ORG-006`, `SEC-AUZ-017` |
+| `POST /api/ui/settings/notification-channels/{id}/confirm` | `PRD-NTF-043` |
+| `GET /applications/new` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016`, `SEC-AUZ-017` |
+| `GET /api/ui/settings/notification-channels` | `PRD-NTF-003`, `CFG-NTF-001`, `PRD-CON-017`, `PRD-CON-021` |
+| `GET /api/ui/top-weaknesses` | `PRD-VUL-013`, `PRD-UIX-011`, `SEC-AUZ-016` |
+| `GET /auth/{provider}/start` | `PRD-IAM-001`, `SEC-SEC-002`, `SEC-SEC-009`, `PRD-CON-032` |
+| `POST /api/ui/ai-providers/{id}/active` | `PRD-AIC-056`, `CFG-AIC-001`, `SEC-PTR-007`, `SEC-AUZ-017` |
+| `POST /step-up` | `PRD-IAM-003`, `SEC-SEC-004` |
+| `GET /api/ui/applications/{id}/editor` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016` |
+| `POST /api/ui/settings/notification-routes` | `PRD-NTF-019`, `CFG-NTF-001` |
+| `GET /auth/callback` | `PRD-IAM-001`, `SEC-SEC-002`, `SEC-SEC-009`, `PRD-CON-032` |
 | `PATCH /api/v1/assets/{id}` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016` |
+| `GET /api/v1/org-nodes` | `PRD-ORG-001`, `SEC-AUZ-010`, `SEC-AUZ-016` |
+| `GET /api/ui/settings/connectors` | `PRD-CON-015`, `PRD-CON-017`, `PRD-CON-021`, `PRD-CON-032`, `PRD-CON-038` |
+| `POST /security-policy` | `PRD-IAM-007`, `PRD-IAM-006`, `SEC-SEC-006` |
+| `GET /api/ui/applications/export` | `PRD-AST-001`, `PRD-API-046`, `SEC-AUZ-016` |
+| `PATCH /api/v1/criticality-tiers/{id}` | `CFG-ORG-001`, `PRD-ORG-006` |
+| `POST /api/ui/settings/connectors/{id}/probe` | `PRD-CON-028`, `PRD-CON-017` |
+| `GET /mfa-enrol` | `SEC-SEC-003`, `PRD-IAM-002` |
+| `GET /attachments/{id}` | `PRD-ASM-007`, `PRD-ASM-012`, `PRD-PTR-005` |
+| `GET /api/ui/graph/{id}` | `PRD-AST-001`, `PRD-AST-004`, `PRD-ORG-001`, `SEC-AUZ-016` |
+| `POST /api/ui/access/users/{id}/roles/revoke` | `PRD-AUZ-001`, `SEC-AUZ-017` |
+| `GET /api/ui/notifications` | `PRD-NTF-010`, `PRD-NTF-018`, `PRD-NTF-014` |
+| `POST /api/ui/access/identity-providers/{id}/transition` | `PRD-IAM-001`, `PRD-CON-010`, `PRD-CON-017`, `PRD-CON-021` |
+| `POST /api/ui/assessment-plan/attestations` | `PRD-ASM-019`, `PRD-ASM-020`, `PRD-ASM-021`, `SEC-AUZ-016` |
+| `POST /api/ui/access/identity-providers/{id}/test` | `PRD-IAM-001`, `PRD-CON-010`, `PRD-CON-017`, `PRD-CON-021` |
+| `GET /api/ui/ai-providers` | `PRD-AIC-056`, `CFG-AIC-001`, `SEC-PTR-007`, `SEC-AUZ-017` |
+| `GET /api/ui/roles` | `PRD-AUZ-001`, `PRD-AUZ-002`, `PRD-AUZ-006` |
+| `GET /api/ui/dependencies/advisories` | `PRD-SBM-035`, `PRD-SBM-056`, `SEC-AUZ-016` |
+| `POST /api/v1/session-reap` | `SEC-SEC-012`, `SEC-SEC-016`, `OPS-DEP-007` |
+| `PATCH /api/v1/org-node-types/{id}` | `CFG-ORG-001`, `PRD-ORG-004` |
+| `GET /api/ui/board/{id}/finding-form` | `PRD-VUL-001`, `PRD-ASM-012`, `SEC-AUZ-017` |
+| `POST /api/ui/outbound-references/{id}/resolve` | `PRD-CON-043`, `PRD-CON-044` |
+| `GET /api/ui/guide` | `PRD-PLT-007`, `INT-UIX-008` |
+| `GET /api/ui/workload` | `PRD-CAP-005`, `PRD-CAP-008`, `PRD-CAP-013`, `PRD-CAP-014` |
+| `GET /projects/{id}/edit` | `PRD-UIX-006`, `INT-UIX-004` |
+| `POST /api/ui/rescan-schedule` | `PRD-SBM-035`, `PRD-SBM-056`, `SEC-AUZ-016` |
+| `POST /api/ui/access/local-sign-in` | `SEC-SEC-002`, `PRD-IAM-007` |
+| `GET /assets/{name}` | `PRD-UIX-006`, `INT-UIX-004` |
+| `POST /api/ui/board/{id}/findings/{findingId}/remediation` | `PRD-VUL-001`, `PRD-WRK-032`, `SEC-AUZ-017` |
+| `POST /api/ui/board/{id}/participants/remove` | `PRD-AUZ-002`, `SEC-AUZ-014`, `SEC-AUZ-017` |
+| `GET /api/v1/criticality-tiers` | `CFG-ORG-001`, `PRD-ORG-006` |
+| `POST /api/ui/suggestions/{id}/decide` | `PRD-AIC-056`, `CFG-AIC-001`, `SEC-AUZ-017` |
+| `POST /api/ui/settings/fields/{id}/move` | `PRD-AST-014`, `PRD-TEN-004`, `PRD-AUZ-006` |
+| `GET /api/v1/org-node-types/{id}` | `CFG-ORG-001`, `PRD-ORG-004` |
+| `GET /ui/{a}/{b}/{c}/{d}` | `PRD-API-036`, `INT-UIX-003` |
+| `GET /api/v1/rescans/pending` | `PRD-SBM-035`, `PRD-SBM-056`, `SEC-AUZ-016` |
+| `POST /api/ui/settings/connectors/{id}/rotate` | `PRD-CON-022`, `PRD-CON-023` |
+| `GET /api/ui/account/notification-preferences` | `PRD-NTF-019`, `PRD-NTF-020`, `PRD-NTF-021`, `CFG-NTF-001` |
+| `GET /api/ui/access/users/{id}` | `PRD-AUZ-001`, `SEC-AUZ-014` |
+| `POST /api/v1/org-node-types` | `CFG-ORG-001`, `PRD-ORG-004` |
+| `GET /api/ui/review-policy` | `PRD-ASM-002`, `CFG-ASM-001`, `SEC-AUZ-017` |
+| `POST /api/ui/ai/budget` | `PRD-AIC-043`, `PRD-AIC-044`, `PRD-AIC-053`, `PRD-AIC-054` |
+| `GET /api/v1/requests` | `PRD-PTR-021`, `PRD-ASM-003`, `SEC-AUZ-016` |
+| `GET /api/ui/workload/analytics` | `PRD-CAP-005`, `PRD-CAP-008`, `PRD-CAP-013`, `PRD-CAP-014` |
+| `GET /api/ui/suggestions` | `PRD-AIC-056`, `CFG-AIC-001`, `SEC-AUZ-017` |
+| `GET /api/v1/requests/{id}/transitions` | `PRD-WRK-031`, `PRD-WRK-032`, `PRD-WRK-036` |
+| `POST /api/ui/assessment-plan/attestations/{id}/withdraw` | `PRD-ASM-019`, `PRD-ASM-020`, `PRD-ASM-021`, `SEC-AUZ-016` |
+| `POST /api/ui/dependencies/artifact/{id}/sbom` | `PRD-AST-001`, `PRD-SBM-056`, `SEC-AUZ-017` |
+| `GET /board` | `PRD-ASM-003`, `PRD-PTR-021`, `SEC-AUZ-016` |
+| `GET /ui/{a}/{b}/{c}` | `PRD-API-036`, `INT-UIX-003` |
+| `GET /api/ui/board/{id}/participants` | `PRD-AUZ-002`, `SEC-AUZ-014`, `SEC-AUZ-017` |
+| `GET /applications/{id}/edit` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016`, `SEC-AUZ-017` |
+| `POST /api/ui/agents/{code}/run` | `PRD-AIC-056`, `CFG-AIC-001`, `SEC-AUZ-017` |
+| `GET /vulnerabilities` | `PRD-UIX-006`, `INT-UIX-004` |
+| `POST /api/v1/requests/{id}/transitions` | `PRD-WRK-031`, `PRD-WRK-032`, `PRD-WRK-036` |
+| `GET /api/ui/assessment-plan` | `PRD-AST-001`, `PRD-ASM-003`, `PRD-ASM-023`, `PRD-ASM-024`, `PRD-ASM-025`, `PRD-CAP-005`, `PRD-UIX-011`, `SEC-AUZ-016` |
+| `GET /api/ui/ai/evaluations` | `PRD-AIC-049`, `PRD-AIC-050` |
+| `GET /api/ui/reports/artifacts/{id}/download` | `PRD-DSH-043`, `PRD-DSH-047` |
+| `POST /api/ui/roles/{id}` | `PRD-AUZ-001`, `PRD-AUZ-002`, `PRD-AUZ-006` |
+| `POST /api/ui/settings/environments/{id}/lifecycle` | `CFG-AST-002`, `PRD-AST-004`, `PRD-TEN-004`, `PRD-AUZ-006` |
+| `GET /api/ui/dependencies/graph` | `PRD-SBM-035`, `PRD-SBM-056`, `SEC-AUZ-016` |
+| `POST /sign-in` | `SEC-SEC-005`, `SEC-SEC-013`, `SEC-TEN-004` |
+| `GET /api/ui/outbound-references/divergences` | `PRD-CON-043`, `PRD-CON-044` |
+| `GET /api/ui/settings/fields` | `PRD-AST-014`, `PRD-TEN-004`, `PRD-AUZ-006` |
+| `POST /api/ui/access/users/{id}/reset` | `PRD-IAM-007`, `SEC-SEC-016`, `SEC-AUZ-017` |
+| `GET /api/ui/applications/{id}` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016` |
+| `GET /app/{a}/{b}/{c}` | `PRD-API-036`, `INT-UIX-003` |
+| `POST /api/ui/access/identity-providers/{id}` | `PRD-IAM-001`, `PRD-CON-010`, `PRD-CON-017`, `PRD-CON-021` |
+| `POST /api/ui/alerts` | `PRD-NTF-001`, `PRD-SBM-056`, `SEC-AUZ-016` |
+| `GET /projects/{id}` | `PRD-UIX-006`, `INT-UIX-004` |
+| `PATCH /api/v1/asset-types/{id}` | `PRD-AST-001`, `PRD-AST-002` |
+| `GET /api/ui/service-credentials` | `PRD-IAM-003`, `PRD-AUZ-002`, `SEC-SEC-004` |
+| `GET /api/ui/board/{id}/comments` | `PRD-ASM-007`, `PRD-ASM-012`, `PRD-VUL-001` |
+| `GET /api/ui/projects/{id}/editor` | `PRD-AST-004`, `PRD-AST-014`, `PRD-AST-016`, `SEC-AUZ-017` |
+| `POST /api/ui/notifications/{id}/read` | `PRD-NTF-010`, `PRD-NTF-018`, `PRD-NTF-014` |
+| `GET /brand/icon-180.png` | `PRD-UIX-006`, `INT-UIX-004` |
+| `GET /workload` | `PRD-CAP-005`, `PRD-CAP-008`, `PRD-CAP-013`, `PRD-CAP-014` |
+| `GET /api/ui/findings/{id}` | `PRD-VUL-002`, `PRD-VUL-004`, `SEC-AUZ-016` |
+| `POST /mfa` | `SEC-SEC-003`, `SEC-SEC-009` |
+| `GET /api/ui/applications` | `PRD-AST-001`, `PRD-AST-008`, `SEC-AUZ-016` |
+| `GET /api/ui/settings/notification-channels/{id}/deliveries` | `PRD-NTF-011`, `PRD-NTF-042` |
+| `POST /mfa-enrol` | `SEC-SEC-003`, `PRD-IAM-002` |
+| `POST /api/v1/sbom-submissions` | `PRD-API-038`, `PRD-API-039`, `PRD-SBM-037` |
+| `POST /api/ui/teams` | `PRD-CAP-001`, `PRD-CAP-013`, `PRD-AUZ-001` |
+| `POST /api/ui/board/{id}/transitions` | `PRD-PTR-021`, `PRD-ASM-003`, `SEC-AUZ-016` |
+| `GET /api/ui/board/{id}/findings/{findingId}` | `PRD-ASM-007`, `PRD-ASM-012`, `PRD-VUL-001` |
+| `POST /api/ui/requests` | `PRD-PTR-021`, `PRD-ASM-003`, `SEC-AUZ-017` |
+| `GET /api/ui/applications/{id}/posture` | `PRD-AST-001`, `PRD-UIX-011`, `PRD-UIX-022`, `SEC-AUZ-016` |
+| `GET /api/ui/dependencies` | `PRD-SBM-035`, `PRD-SBM-056`, `SEC-AUZ-016` |
+| `GET /api/ui/vulnerabilities` | `PRD-VUL-013`, `PRD-VUL-015`, `PRD-UIX-011`, `SEC-AUZ-016` |
+| `GET /api/ui/session` | `PRD-PTR-021`, `PRD-ASM-003`, `SEC-AUZ-016` |
+| `GET /board/{id}` | `PRD-ASM-003`, `PRD-PTR-021`, `SEC-AUZ-016` |
+| `GET /pipeline/findings/{id}` | `PRD-UIX-006`, `INT-UIX-004` |
+| `POST /api/ui/settings/environments` | `CFG-AST-002`, `PRD-AST-004`, `PRD-TEN-004`, `PRD-AUZ-006` |
+| `GET /api/ui/organization` | `PRD-ORG-001`, `SEC-AUZ-010`, `SEC-AUZ-016` |
+| `POST /api/v1/rescans/{id}` | `PRD-SBM-035`, `PRD-SBM-056`, `SEC-AUZ-016` |
+| `POST /api/ui/settings/environments/{id}/move` | `CFG-AST-002`, `PRD-AST-004`, `PRD-TEN-004`, `PRD-AUZ-006` |
+| `GET /ui` | `PRD-API-036`, `INT-UIX-003` |
+| `PATCH /api/ui/assessment-plan/windows/{id}` | `PRD-ASM-015`, `PRD-ASM-016`, `PRD-ASM-017`, `PRD-ASM-018`, `SEC-AUZ-016` |
+| `POST /api/ui/roles/{id}/delete` | `PRD-AUZ-001`, `PRD-AUZ-002`, `PRD-AUZ-006` |
+| `POST /api/ui/ai/ask` | `PRD-AIC-057`, `PRD-AIC-030`, `PRD-AIC-033`, `PRD-AIC-034`, `PRD-AIC-036` |
+| `GET /api/ui/hosts` | `PRD-AST-002`, `PRD-AST-004`, `SEC-AUZ-016` |
+| `POST /api/ui/teams/members` | `PRD-CAP-001`, `PRD-CAP-013`, `PRD-AUZ-001` |
+| `POST /api/ui/access/identity-providers` | `PRD-IAM-001`, `PRD-CON-010`, `PRD-CON-017`, `PRD-CON-021` |
+| `GET /access/users/{id}` | `PRD-UIX-006`, `INT-UIX-004` |
+| `POST /api/ui/ai/draft` | `PRD-AIC-019`, `PRD-AIC-036` |
+| `POST /api/ui/outbound-references/{id}/retry` | `PRD-CON-026`, `PRD-CON-025` |
+| `GET /roles/{id}` | `PRD-AUZ-001`, `SEC-SEC-004` |
+| `POST /api/ui/access/identity-providers/{id}/group-roles` | `PRD-IAM-001`, `PRD-CON-010`, `SEC-AUZ-014` |
+| `GET /brand/logo.svg` | `PRD-UIX-006`, `INT-UIX-004` |
 
 **The gate passing is not the API being built.** DOC-05 specifies the API for every resource group; this is one group. Backward traceability asks whether what exists traces to a requirement, and forward coverage — the other gate above — is where the missing operations show up.

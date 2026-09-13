@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { TeamRoster } from "@/components/TeamRoster";
 import { ServiceCredentials } from "@/components/ServiceCredentials";
+import { IdentityProviders } from "@/components/IdentityProviders";
 import { SubmissionHealth } from "@/components/SubmissionHealth";
 import { Pager, usePaging } from "@/components/Paging";
 import { Input } from "@/components/ui/input";
@@ -66,7 +67,7 @@ export function AccessPage() {
 
   const requested = params.get("tab");
   const tab = requested === "roles" || requested === "projects" || requested === "teams"
-    || requested === "credentials" ? requested : "people";
+    || requested === "credentials" || requested === "identity" ? requested : "people";
 
   const users = useMemo(() => {
     if (!data) return [];
@@ -129,6 +130,12 @@ export function AccessPage() {
         <TabLink active={tab === "credentials"}
                  onClick={() => setParams({ tab: "credentials" }, { replace: true })}>
           Integrations
+        </TabLink>
+        {/* Where people come FROM. A provider decides who may sign in at all, which is authority above
+            every role on this page, so it sits with them rather than under Settings. */}
+        <TabLink active={tab === "identity"}
+                 onClick={() => setParams({ tab: "identity" }, { replace: true })}>
+          Identity providers
         </TabLink>
       </div>
 
@@ -195,6 +202,8 @@ export function AccessPage() {
         <RoleMatrix roles={data.roles} permissions={data.permissions} />
       ) : tab === "teams" ? (
         <TeamRoster />
+      ) : tab === "identity" ? (
+        <IdentityProviders />
       ) : tab === "credentials" ? (
         // ONLY the credentials now. Alert destinations and the scan schedule moved to /settings: a
         // webhook is not an identity — nobody signs in as it and it holds no permission — and a

@@ -1,0 +1,67 @@
+{{- /*
+OPTION: how the browser reaches the application tier. TLS terminates here (ADR-057, OPS-DEP-017);
+the ingress makes no authorization decision. Gateway API is the default because it is the
+mesh-neutral shape both Istio and Linkerd implement; an nginx Ingress is offered for clusters that
+have not moved.
+*/ -}}
+{{- if eq .Values.ingress.kind "gatewayApi" }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "aspm.fullname" . }}
+  labels:
+    {{- include "aspm.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ .Values.ingress.gatewayApi.gatewayName }}
+      {{- if .Values.ingress.gatewayApi.gatewayNamespace }}
+      namespace: {{ .Values.ingress.gatewayApi.gatewayNamespace }}
+      {{- end }}
+  hostnames:
+    - {{ .Values.ingress.host | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      filters:
+        # The application trusts the first hop of X-Forwarded-For as the client address for its
+        # authentication record (SEC-SEC-008). The gateway sets it; nothing before it may.
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: X-Forwarded-Proto
+                value: https
+      backendRefs:
+        - name: {{ include "aspm.fullname" . }}-app
+          port: 8080
+{{- else if eq .Values.ingress.kind "nginx" }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "aspm.fullname" . }}
+  labels:
+    {{- include "aspm.labels" . | nindent 4 }}
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "64m"
+    {{- with .Values.ingress.nginx.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.nginx.className }}
+  tls:
+    - hosts: [{{ .Values.ingress.host | quote }}]
+      secretName: {{ .Values.ingress.nginx.tlsSecretName }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "aspm.fullname" . }}-app
+                port:
+                  number: 8080
+{{- end }}

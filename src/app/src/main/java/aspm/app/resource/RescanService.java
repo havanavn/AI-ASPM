@@ -54,7 +54,7 @@ public final class RescanService {
     /** {@code CON-PLT-021}: the record is written in the transaction that makes the change. */
     private final aspm.app.audit.AuditTrail audit =
             new aspm.app.audit.AuditTrail(java.time.Clock.systemUTC());
-    private final ObjectStore objects = new ObjectStore(System.getenv());
+    private final ObjectStore objects = ObjectStore.fromDeployment();
     private final SbomGraphWriter writer;
 
     public RescanService(DataSource dataSource) {

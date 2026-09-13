@@ -162,4 +162,27 @@ class PlanWindowTest {
         assertFalse(code.contains(".subList(0, MAX_PER_REQUEST)"),
                 "truncation is the failure mode this bound exists to avoid, not its implementation");
     }
+
+    @Test
+    @DisplayName("V080 / ADR-030: the window's expected owner is a soft reference, written on every path")
+    void ownerIsSoftAndOnEveryWritePath() throws IOException {
+        String code = source();
+        Path migration = Path.of(
+                "../module/assessment-impl/src/main/resources/db/migration/V080__plan_window_owner.sql");
+        assertTrue(Files.exists(migration), migration + " is missing");
+        String ddl = Files.readString(migration, StandardCharsets.UTF_8);
+        assertTrue(ddl.contains("team_id") && ddl.contains("assessor_principal_id"),
+                "the owner is two columns: the team, and the person within it");
+        assertFalse(ddl.toUpperCase(java.util.Locale.ROOT).contains("REFERENCES"),
+                "assessor_team and principal belong to other modules; ADR-030 forbids the foreign key, "
+                        + "and the read path says \"no longer exists\" instead of failing");
+        assertTrue(code.contains("team_id, assessor_principal_id"),
+                "the INSERT must carry both owner columns, or a window planned for a team is stored "
+                        + "for nobody");
+        assertTrue(code.contains("team_id = CASE WHEN ? THEN ? ELSE w.team_id END"),
+                "the UPDATE must leave the owner alone when the caller did not mention it: a note edit "
+                        + "that silently un-assigns a team is a plan change nobody made");
+        assertTrue(code.contains("(team no longer exists)") && code.contains("(person no longer exists)"),
+                "a dangling soft reference is shown as such, never rendered as an empty owner");
+    }
 }

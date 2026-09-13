@@ -84,6 +84,23 @@ ADR-049 through ADR-056 are the eight technology selections DOC-02 §16 deferred
 | ADR-057 | The JDK HTTP server as the application tier's HTTP runtime, behind the TLS-terminating ingress | Accepted |
 | ADR-058 | Server-rendered HTML from the application tier, with no build step and no client framework | Accepted |
 | ADR-059 | Local password and TOTP authentication for v1, **narrowing ADR-004** | Accepted |
+| ADR-060 | A second automated ingestion path: SARIF scan reports, alongside the SBOM push | Accepted |
+| ADR-061 | The environment an endpoint is published in is a tenant catalogue, not a pair of form fields | Accepted |
+| ADR-062 | A unique-identity violation is a conflict the caller can act on, not an internal error | Accepted |
+| ADR-063 | Idempotency keys are required and unenforced; make them real rather than ceremonial | Accepted |
+| ADR-064 | One identity rule per asset type, applied by every writer that creates one | Accepted |
+| ADR-065 | A plan is a dated intention, stored; not a draft request and not a recurrence rule | Accepted |
+| ADR-066 | A review the platform did not observe is asserted, not recorded as observed | Accepted |
+| ADR-067 | Secrets are a contract with adapters: platform-sealed by default, the enterprise store as an option, deployment and tenant resolution kept apart | Accepted |
+| ADR-068 | Federated sign-in over OIDC with presets as data; ADR-059 retained for local and break-glass access | Accepted |
+| ADR-069 | Notification channels as shipped adapters, routes as tenant data, delivery through an outbox the worker drains | Accepted |
+| ADR-070 | Outbound connectors as shipped adapters behind one contract; the reference is one-way and divergence is a decision for a person | Accepted |
+| ADR-071 | One artifact deployed as the DOC-15 runtime units behind a mesh, with the chart generated from the deployment model | Accepted |
+| ADR-072 | A tenant table without forced row-level security exists only by registered exemption | Accepted |
+| ADR-073 | An unauthenticated-class operation with a resolvable session binds that session's tenant context | Accepted |
+| ADR-074 | Reports are rendered per recipient by the worker; compositions are product-fixed and carry their basis | Accepted |
+| ADR-075 | The deferred AI capabilities are delivered behind the built rails: provider families as adapters, the DOC-10 §8 capabilities on the ledger, a grounded question surface, budget and invocation records, and the harness | Accepted; supersedes ADR-044 in part |
+| ADR-076 | A planned window names who is expected to do it, as a soft reference; the plan is read per unit, team, person and month | Accepted |
 
 ---
 
@@ -907,7 +924,7 @@ ADR-049 through ADR-056 are the eight technology selections DOC-02 §16 deferred
 
 ## ADR-044 — AI capabilities deferred from v1 while the AI architecture is built
 
-**Status.** Accepted · **Date.** 2026-08-04 · **Deciders.** Chief Software Architect, Principal Security Architect, Staff Product Manager
+**Status.** Accepted; **superseded in part by ADR-075** (2026-09-13) — the deferral of the capabilities is lifted; the decision to build the architecture first, and every property of that architecture, stands · **Date.** 2026-08-04 · **Deciders.** Chief Software Architect, Principal Security Architect, Staff Product Manager
 
 **Context.** DOC-17 §3.3. The product is named AI-native.
 
@@ -1780,7 +1797,7 @@ Neutral: types whose identity rule is genuinely the display name — where the n
 
 ## ADR-065 — A plan is a dated intention, stored; not a draft request and not a recurrence rule
 
-**Status.** Accepted · **Date.** 2026-08-25 · **Deciders.** Chief Software Architect, Principal Security Architect
+**Status.** Accepted; **superseded in part by ADR-076** (2026-09-13) — the consequence "a window carries no assignee" no longer holds; the rest stands · **Date.** 2026-08-25 · **Deciders.** Chief Software Architect, Principal Security Architect
 
 **Context.** `PRD-ASM-003` makes the periodic full review an obligation the platform tracks, and V024 gives it the machinery: `full_review_policy` states the interval per criticality tier, `assessment_trigger.counts_as_full_review` records which requests discharge it, and `application_review_cadence` computes what is owed and when. Everything needed to say *this application is overdue* was present.
 
@@ -1869,10 +1886,322 @@ So: `full_review_count` keeps its existing meaning and counts observed reviews o
 
 **References.** `PRD-ASM-003`, `PRD-ASM-019`, `PRD-ASM-020`, `PRD-ASM-021`, `PRD-ASM-022`, `PRD-PLT-001`, `SEC-AUZ-016`, `SEC-AUZ-020`, ADR-027, ADR-030, ADR-065, V024, V071.
 
+## ADR-067 — Secrets are a contract with adapters: platform-sealed by default, the enterprise store as an option, deployment and tenant resolution kept apart
+
+**Status.** Accepted · **Date.** 2026-09-13 · **Deciders.** Chief Software Architect, Principal Security Architect
+
+**Context.** `OQ-026` asked whether the platform provides its own secrets store or integrates with an enterprise vault, and was escalated as blocking build block 1 because three credential paths depend on the answer: test account credentials, connector credentials and secret finding values. ADR-052 selected the secrets contract's required properties — reference-only after entry, tenant namespacing, dual-controlled destruction — and left the product behind the contract open. Meanwhile the running platform had exactly one way to hold a credential, `CredentialCustody` sealing into a table with a deployment key, and every new credential-bearing feature (identity providers, notification channels, connectors) was about to reach for it directly, which would have made the answer to `OQ-026` a rewrite.
+
+A conglomerate that already operates a vault will not accept a second one holding access to its engineering estate; a deployment that operates no vault cannot be told to stand one up before the platform works. Both are real customers.
+
+**Decision.** A `SecretsProvider` contract in the shared kernel (`aspm.sharedkernel.secrets`) — resolve by reference, store, destroy, `writable`, `tenantScoped` — with adapters in the application tier: `sealed` (the platform default, `CredentialCustody` over `platform_secret`, V073), `file` (a mounted directory, for deployment secrets), `env` (development only, refused elsewhere), `vault` (HashiCorp Vault / OpenBao KV v2, Kubernetes or token auth), `azkv` (Azure Key Vault), `awssm` (AWS Secrets Manager, static keys or web identity), `gcpsm` (Google Secret Manager). `ASPM_SECRETS_PROVIDERS` lists the adapters in resolution order and `ASPM_SECRETS_WRITER` names the one that receives what tenants enter. A reference is `provider:path`, checked by the engine (`is_secret_reference`) wherever a column may hold one.
+
+Two resolutions are kept apart on purpose: `resolveTenant(tenantId, ref)` for anything a tenant configured, which consults tenant-scoped adapters only and namespaces the path with the tenant; `resolveDeployment(ref)` for what the deployment itself needs, which never consults a tenant-scoped adapter. A tenant reference can therefore never read a deployment secret, and a deployment secret can never be reached by naming it from a tenant's configuration — the exfiltration path a single shared resolver would have opened.
+
+Deployment secrets arrive as `ASPM_<NAME>_REF=file:<name>` and are resolved once into an in-memory copy of the environment at start (`Secrets.expandDeploymentReferences`); the process environment never carries the value (`OPS-DEP-020`).
+
+**Options considered.**
+
+| Option | Why not |
+|---|---|
+| Platform-provided store only | Rejected by every customer that already has a vault and a policy saying credentials live in it. Also makes the platform's own store the highest-value asset in the estate with no way to move it out. |
+| Enterprise vault only | A deployment without one — a laptop, a proof of value, a subsidiary with no platform team — cannot start. The default exists so the option set has a floor. |
+| One resolver, tenant path prefixes only | Simpler, and it is the SSRF-shaped mistake: a tenant naming `file:db-app-password` reads the database password through the platform's own file adapter. Separating the two resolutions removes the parameter a tenant could occupy. |
+| Configure the store per tenant | ADR-002 makes the tenant a hard isolation boundary; the store is deployment infrastructure under it, namespaced per tenant. A per-tenant store choice would make the isolation property depend on tenant configuration. |
+
+**Consequences.**
+
+- **`OQ-026` is answered by the option set, not by a product name.** DOC-20 records it as answered; the working assumption ("integration supported, with a platform-provided default") is what was built.
+- **Accepted: the sealed default is itself a high-value asset.** Its key is a deployment secret (`ASPM_CREDENTIAL_KEY_REF`), it is a single key for the deployment, and rotating it re-seals every row. The record does not pretend this is as good as an HSM-backed vault; it says so in the settings page and in `Secrets.describe()` at start.
+- **Accepted: four cloud adapters, one author.** Each was written against the provider's documented REST contract and a fake in tests, not against the live service. A signing defect in one would present as `AUTHENTICATION` at first use, which is loud, and the test suite carries the AWS signature vector.
+- **Cost: every credential-bearing table carries a CHECK.** `is_secret_reference` on `identity_provider`, `notification_channel`, `connector` and their rotation columns. A future table that forgets it is the defect; `IsolationPathInventoryTest` I13 is the structural guard.
+- **Egress is a consequence.** A vault address, a Key Vault name, a webhook URL — each is a destination a tenant or an operator typed. `EgressGuard` is the one enforcement point (`TST-AUZ-001`): https only, resolved at use, private and link-local ranges refused, with the operator-vouched exceptions (`ASPM_SMTP_RELAYS`) named rather than implied.
+
+**Revisit if.** A tenant requires its own key custody for the sealed store (per-tenant keys are ADR-002's stated direction and this default has one key), or a second deployment secret appears that the `_REF` expansion cannot express — a certificate, a keystore — at which point the file adapter grows a binary form.
+
+**References.** `PRD-CON-021`, `PRD-CON-022`, `SEC-SEC-023`, `OPS-DEP-019`, `OPS-DEP-020`, `TST-AUZ-001`, `TST-TEN-001`, ADR-002, ADR-052, `OQ-026`, V073.
+
+## ADR-068 — Federated sign-in over OIDC with presets as data; ADR-059 retained for local and break-glass access
+
+**Status.** Accepted · **Date.** 2026-09-13 · **Deciders.** Chief Software Architect, Principal Security Architect
+
+**Context.** ADR-004 requires OIDC/OAuth2 for humans. ADR-059 narrowed it to a local credential with TOTP "for v1", stating that the federated half was specified and not built. A conglomerate does not run a second identity for its staff: the first question a platform team asks is "Okta, Entra or Keycloak?", and the honest answer had been "none".
+
+**Decision.** Authorization-code flow with PKCE against any OpenID Connect issuer, implemented in the application tier with the JDK's cryptography and no framework: discovery, JWKS retrieval, signature verification (RS256/384/512, PS256, ES256/384), `nonce` and `state` as single-use rows (`federated_login_state`), claim validation, and a JIT-provisioned principal linked by `(issuer, subject)` in `federated_identity` (V074).
+
+**Presets are data, not code paths.** Okta, Microsoft Entra ID, Keycloak, Google and "generic" are rows of defaults — issuer shape, scopes, the claim that carries groups — that pre-fill the administration form. Every provider then goes through the same discovery and the same verification. Adding a provider is adding a preset, and a tenant whose provider has no preset uses generic.
+
+**Groups become roles at sign-in and nowhere else.** `identity_provider_group_role` maps a group claim value to a tenant role; the mapping is evaluated at authentication and reconciled on the principal's assignments, which is `PRD-CON-053` and deliberately not `PRD-CON-051` (identity synchronization does not manage roles). A provider-asserted second factor is recorded from `amr`/`acr` as `mfa_asserted_by_provider`, so a tenant may decide whether the platform's own TOTP is still required.
+
+**ADR-059 is retained, not superseded.** Local sign-in stays as the break-glass path and as the path for a tenant without a provider. A tenant switch turns local sign-in off for everyone except principals flagged break-glass, and the sign-in page says which paths are open rather than showing a password box that cannot work.
+
+**Options considered.**
+
+| Option | Why not |
+|---|---|
+| An identity library or framework | Rejected on ADR-057's grounds: the runtime is the JDK, the toolchain gates are static analysis over our own code, and a framework's token handling is precisely the code the gates cannot see. The protocol is small enough to own; its verification is what we most want to read. |
+| SAML alongside OIDC | Every provider a customer named speaks OIDC; SAML is a second parser of attacker-reachable XML for no named customer. Recorded as not built, not as rejected forever. |
+| One code path per provider | The temptation, because each has quirks. Rejected because a quirk in code is a maintenance branch per vendor; a quirk in a preset is a row. |
+| Synchronize users and groups from the provider (SCIM) | `PRD-CON-050` asks for it and it is not here. JIT provisioning at sign-in covers "who can get in"; deprovisioning within `NFR-SEC-001`'s bound still relies on the provider refusing the next sign-in and the platform's own session lifetime. Named as the gap. |
+
+**Consequences.**
+
+- **`ASPM_PUBLIC_BASE_URL` is configuration, not the Host header.** The redirect URI is built from it and registered at the provider; deriving it from a request would let an attacker choose where the authorization code lands. Absent, federation is configured-but-inactive and the page says so. Outside development it must be `https`.
+- **Accepted: the client secret is a tenant credential.** It lives in the secrets store by reference (ADR-067); the identity provider is retired by destroying it.
+- **Accepted: an inactive provider row still exists.** Retiring keeps the row and its group mappings for the audit trail; nothing signs in through it.
+- **Cost: the sign-in attempt log gained a real client address.** A multi-hop `X-Forwarded-For` broke the `inet` column at the first proxy with two hops; it is parsed to the first address now, and the defect is recorded here rather than in a comment.
+
+**Revisit if.** A customer requires SAML or SCIM in writing, or a provider's discovery document deviates from the standard in a way a preset cannot express.
+
+**References.** `PRD-CON-050`, `PRD-CON-053`, `SEC-SEC-002`, `SEC-SEC-011`, `NFR-SEC-001`, ADR-004, ADR-057, ADR-059, ADR-067, V074.
+
+## ADR-069 — Notification channels as shipped adapters, routes as tenant data, delivery through an outbox the worker drains
+
+**Status.** Accepted · **Date.** 2026-09-13 · **Deciders.** Chief Software Architect, Principal Security Architect
+
+**Context.** DOC-13 specified notification end to end and the module implemented its pure half — audience, coalescing, suppression, escalation arithmetic — and stopped where a rendered notification would have to go somewhere. There was no channel, no delivery record, no queue, no preference and no notification centre; `alert_webhook` delivered one event kind to one destination kind. ADR-054 had already chosen the operational store as the queue for the DISPATCH class and left it unrealised.
+
+**Decision.** V075. A channel is one of five shipped adapters — SMTP (any relay; STARTTLS, implicit TLS, or cleartext only to an operator-vouched relay), Slack incoming webhook, Slack bot API, Microsoft Teams webhook, a signed generic webhook — and the kind list is product-fixed (DOC-13 §14.1: "a new channel implements the delivery contract"). Which channels a tenant configures, which category goes to which channel for whom, and what each person mutes or defers are rows. A channel receives nothing but a six-digit verification code through itself until the administrator types it back (`PRD-NTF-043`). External content is subject and link unless the channel opts into detail (`PRD-NTF-032`). The in-product centre is the `notification` table and is always on (`PRD-NTF-018`).
+
+Delivery is an outbox: `notification_delivery` rows claimed with `FOR UPDATE SKIP LOCKED`, leased by time, retried by `FailureClass` to a terminal state, with the recipient's visibility of the subject re-checked at delivery (`PRD-NTF-029`). The worker runs in the `worker` or `all` runtime unit (`ASPM_ROLE`); the `app` unit enqueues and never sends. Own SMTP client, no mail library, for the reason ADR-057 gives.
+
+**Options considered.**
+
+| Option | Why not |
+|---|---|
+| A message broker for the outbox | ADR-054 rejected it: a second stateful component for a queue whose volume the operational store carries with one index, and a second isolation boundary to test. |
+| Deliver synchronously from the emitting transaction | A slow relay would hold a finding transition open, and a failed relay would roll back the transition. The outbox is what makes the transition's commit independent of the mail server. |
+| Channel kinds as tenant configuration | ADR-027 fixes the catalogue of what the product can do and leaves to tenants what it does for them. A kind is a shipped adapter; a "custom kind" is the generic webhook. |
+| Send detail by default and let the tenant restrict | The wrong default: a chat channel is readable by whoever is in it, and a finding title alone leaks less than a body. Detail is opt-in per channel. |
+
+**Consequences.**
+
+- **Accepted: at-least-once.** A lease that expires mid-send is retried; a recipient may see a message twice. The alternative — exactly-once — needs a coordinator the platform does not have.
+- **Accepted: the SMTP client is ours.** It speaks the protocol this platform needs and nothing else; a relay demanding an unusual extension fails classified and loud rather than negotiating.
+- **Cost: every emitting site names recipients explicitly.** `Notifier.emit(connection, tenant, event, recipients)` — there is no ambient "notify everyone interested", because "interested" is a scope question the emitter has to answer.
+- **A credential that is also a destination.** A Slack webhook URL is both; being a secret does not excuse it from the egress guard, and the sender checks it at send time.
+
+**Revisit if.** Delivery volume makes the operational store the bottleneck (ADR-054's extraction trigger), or a tenant requires a channel that cannot be expressed as a signed webhook on their side.
+
+**References.** `PRD-NTF-003`, `PRD-NTF-018`, `PRD-NTF-019`, `PRD-NTF-020`, `PRD-NTF-021`, `PRD-NTF-029`, `PRD-NTF-031`, `PRD-NTF-032`, `PRD-NTF-042`, `PRD-NTF-043`, `CON-PLT-030`, `CON-PLT-031`, `CON-PLT-032`, ADR-027, ADR-054, ADR-057, ADR-067, V075.
+
+## ADR-070 — Outbound connectors as shipped adapters behind one contract; the reference is one-way and divergence is a decision for a person
+
+**Status.** Accepted · **Date.** 2026-09-13 · **Deciders.** Chief Software Architect, Principal Security Architect
+
+**Context.** DOC-21 specifies the connector contract, lifecycle, credentials, failure classification, health, egress, minimization and the one-way outbound reference; the integration module held the pure types (`FailureClass`, `ConnectorHealth`, `EgressPolicy`, `OutboundPropagation`) and nothing that could create a ticket. DOC-04 named three tables that did not exist. Every customer conversation reaches "can it create the Jira ticket" within the first hour.
+
+**Decision.** V076 and `aspm.app.integration`. One `ConnectorAdapter` contract with three operations — create a reference, observe it, probe the credential — and five shipped adapters: Jira Cloud, Jira Data Center, GitLab issues, ServiceNow Table API, and a signed generic webhook for everything else. Each states its minimum permission set on the target and its outbound content per operation next to the code (`PRD-CON-016`, `PRD-CON-036`). What leaves is a summary, severity, place in the tree, source tool and the platform link — never the description, proof of concept or evidence (`PRD-CON-045`, `PRD-CON-037`) — and the ticket says in its body that it is not the record.
+
+**One-way, enforced by absence.** There is no method that applies external state. The worker observes each linked reference on the connector's interval, writes what the tracker said on the reference, and where it disagrees with the finding records one of the four divergence kinds and notifies the creator and the connector owner. Resolution is a note by a person; the finding is untouched (`PRD-CON-042`–`044`, ADR-040).
+
+**The rest of the contract, as built.** Failure classified once, in `ConnectorHttp`, with `CONFIGURATION` added to the domain enum because DOC-21 §5 lists it; a credential or configuration failure opens the circuit at once and it does not reopen on a timer (`PRD-CON-024`); the owner is told once and an open circuit nobody was told about is corrected on the next tick (`PRD-CON-029`); rotation stores the new credential, proves it against the target, and keeps the old one valid for an overlap the worker honours (`PRD-CON-022`); a connector carries the subtree it may speak for and a finding outside it is refused before anything is queued (`PRD-CON-038`); kinds may be disabled per deployment and are then shown with their consequence, not hidden (`PRD-CON-054`, `PRD-CON-055`).
+
+**Options considered.**
+
+| Option | Why not |
+|---|---|
+| Bidirectional synchronization with the tracker | Rejected by ADR-040 and PP-10: closing the ticket would close the finding whether or not the vulnerability is gone. |
+| Push the full finding into the ticket | The tracker's audience is broader than the finding's readership and has no scope enforcement. A reference plus a minimal summary is what the remediating team needs. |
+| Observation by webhook from the tracker | Requires an inbound endpoint per tracker with its own authentication, and puts data-derived content on an ingress. Polling on a configured interval keeps the tracker a destination only. |
+| A vendor SDK per tracker | Same reasoning as ADR-057 and ADR-068: the calls are a handful of REST operations, and their egress and failure handling must be ours to read. |
+
+**Consequences.**
+
+- **Accepted: divergence detection is only as fresh as the interval.** Default sixty minutes; a ticket closed and reopened inside one interval is not seen. Stated rather than solved.
+- **Accepted: a generic webhook receiver is the tenant's code.** It must verify the signature and answer the small JSON contract; a receiver that does not is `PROTOCOL` at first use.
+- **Cost: two new permissions.** `int.connector.manage` (an egress destination for content about the estate) and `int.reference.create` (a triage decision about one finding). Granted at migration to roles holding user management and finding triage respectively, and a tenant may narrow them.
+- **The application tier's egress classes gained a real consumer.** `CONNECTOR_ALLOWLIST` on the worker unit in the deployment model is no longer a placeholder; the chart's NetworkPolicy and `ServiceEntry` for it come from configuration (ADR-071).
+
+**Revisit if.** A tracker requires an inbound webhook to be usable at all, or divergence latency becomes a compliance question — either moves observation from polling to an authenticated inbound path with its own record.
+
+**References.** `PRD-CON-015`, `PRD-CON-016`, `PRD-CON-017`, `PRD-CON-019`, `PRD-CON-020`, `PRD-CON-021`, `PRD-CON-022`, `PRD-CON-024`, `PRD-CON-025`, `PRD-CON-026`, `PRD-CON-028`, `PRD-CON-029`, `PRD-CON-032`, `PRD-CON-033`, `PRD-CON-034`, `PRD-CON-036`, `PRD-CON-037`, `PRD-CON-038`, `PRD-CON-042`, `PRD-CON-043`, `PRD-CON-044`, `PRD-CON-045`, `PRD-CON-054`, `PRD-CON-055`, ADR-040, ADR-054, ADR-067, V076.
+
+## ADR-071 — One artifact deployed as the DOC-15 runtime units behind a mesh, with the chart generated from the deployment model
+
+**Status.** Accepted · **Date.** 2026-09-13 · **Deciders.** Chief Software Architect, Principal Security Architect
+
+**Context.** ADR-003 is a modular monolith. DOC-15 §4 models the runtime units — ingress, web, application tier, match workers, projection workers, general workers, scheduler — with their placement, probes and egress allowlists, and `src/deployment` fails the build when the model is violated. A customer asking for "service mesh" is asking whether this artifact fits an estate where every service speaks mTLS, egress is denied by default, TLS ends at a gateway and secrets are mounted, not typed. The compose file answered for a laptop only.
+
+**Decision.** `deploy/k8s/chart/aspm`: the same image as compose, deployed as one Kubernetes Deployment per runtime unit that exists today — `app` (`ASPM_ROLE=app`, serves HTTP, enqueues) and `worker` (`ASPM_ROLE=worker`, drains the notification, connector and report outboxes) — with `ASPM_ROLE` deciding the unit, which is `OPS-DEP-003` taken literally. Units the model has and the process does not (match, projection, scheduler) are listed in the generated model file under `notShipped` with the reason each, not emitted as empty Deployments.
+
+**Generated, not checked.** `KubernetesManifests` emits `files/model.yaml` from the DOC-15 model — units, probes, resource envelopes, egress classes — and a test rewrites it on every build and fails on drift. Every Deployment, NetworkPolicy and Istio `Sidecar` is rendered from that file. A policy that says something the model does not is a diff, not a discovery.
+
+**Mesh as an option, egress policy not.** `mesh.kind: none | istio | linkerd`; Istio gets `PeerAuthentication STRICT`, a `Sidecar` with `REGISTRY_ONLY` outbound and one `ServiceEntry` per allowed external host; Linkerd gets injection and `Server` resources. The NetworkPolicy — deny by default per unit, DNS, the data tier, each egress class as CIDR and ports with the private ranges excepted — is rendered regardless, because a deployment without a mesh must still refuse a webhook to the metadata service (`OPS-DEP-014`, `OPS-DEP-015`). TLS terminates at the Gateway API `HTTPRoute` or an nginx Ingress (`OPS-DEP-017`).
+
+**Secrets as files.** A Kubernetes Secret or a Secrets Store CSI `SecretProviderClass` (Vault, Azure, AWS, Google) fills one mount; the pods carry `ASPM_*_REF=file:<name>` and nothing else (`OPS-DEP-019`, `OPS-DEP-020`, ADR-067). Migration and conformance are Helm hooks running the same `apply.sh` and `conformance.sql` as the laptop, as `aspm_migrate` and `aspm_verify`; a failure fails the release (`OPS-DEP-031`).
+
+**Options considered.**
+
+| Option | Why not |
+|---|---|
+| Split the monolith into services to "be mesh-native" | Relitigates ADR-003 for a property the mesh does not require. A mesh secures traffic between the units you have; it does not need more of them. |
+| Hand-written manifests | The stated reason `src/deployment` exists is that "a checker and a manifest drift; a generator cannot". Hand-written manifests would be the drift. |
+| Require a mesh | Rejected: the platform's egress control must hold on a cluster without one, and many estates run NetworkPolicy alone. |
+| Pods read secrets from environment variables set by the chart | Puts the value in the pod spec, in `kubectl describe`, and in every process's environment. `_REF` plus a mount keeps it in memory only. |
+
+**Consequences.**
+
+- **Accepted: two Deployments, not seven.** Match and projection work runs inside the two units. The chart says so; the model says why. When the separate pools arrive, they land as new rows in the generated file.
+- **Accepted: the data tier is not provisioned.** Managed PostgreSQL 18, Valkey and object storage are prerequisites; the chart holds three login roles and never a superuser. Backups and restore rehearsal are the operator's (`OPS-DEP-033`–`OPS-DEP-037`).
+- **Cost: the chart depends on a build step.** `files/model.yaml`, `apply.sh` and `conformance.sql` are written into the chart by the test; a chart packaged without running the build is incomplete, and `helm template` fails rather than rendering something stale.
+- **One tenant per release.** `ASPM_TENANT_ID` is a value; a second tenant is a second release. Multi-tenant routing at the ingress is not here.
+
+**Revisit if.** A unit the model lists needs its own scaling profile in production — the first measured reason to ship it separately — or the mesh's own authorization (an `AuthorizationPolicy` deciding who may call the app) becomes a customer requirement rather than the platform's own permission enforcement.
+
+**References.** `OPS-DEP-003`, `OPS-DEP-005`, `OPS-DEP-006`, `OPS-DEP-008`, `OPS-DEP-009`, `OPS-DEP-014`, `OPS-DEP-015`, `OPS-DEP-017`, `OPS-DEP-019`, `OPS-DEP-020`, `OPS-DEP-028`, `OPS-DEP-031`, ADR-003, ADR-057, ADR-067.
+
+## ADR-072 — A tenant table without forced row-level security exists only by registered exemption
+
+**Status.** Accepted · **Date.** 2026-09-13 · **Deciders.** Chief Software Architect, Principal Security Architect
+
+**Context.** The post-migration conformance check asserted that every table carrying `tenant_id` has row-level security enabled and forced, and carried a hardcoded list of the tables that legitimately do not — global reference tables such as `tenant`, `cwe` and `owasp_top10_2025`. Four tables added after the list was written were global, correct, and failing the check, which meant the check was being read as noise by the time it was needed.
+
+**Decision.** V072: `tenant_isolation_exemption` — table name, a reason of at least forty characters, the migration that registered it — and a function `unregistered_unforced_tables()` that the conformance check and a migration-time `DO` block both read. A global table is now registered by the migration that creates it, with the reason in the row, or the migration fails.
+
+**Options considered.**
+
+| Option | Why not |
+|---|---|
+| Extend the hardcoded list | The fourth time; and the list lived in a verification script, so a table added in a migration could be correct and still fail a check nobody reruns until deployment. |
+| Drop the check | The check is `TST-TEN-001`'s cheapest structural form. |
+
+**Consequences.**
+
+- **Accepted: an exemption is a claim.** The reason is text; nothing verifies that a registered table really is global. The register makes the claim visible and attributable, which is what a review needs.
+- **Cost: registering is a step a migration author has to know about.** The migration fails loudly if forgotten, which is the intended reminder.
+
+**Revisit if.** A tenant-scoped table ever needs to be unforced for a measured performance reason — the register would then carry a compensating control, not only a reason.
+
+**References.** `TST-TEN-001`, `SEC-TEN-004`, `OPS-DEP-031`, ADR-002, V072.
+
+## ADR-073 — An unauthenticated-class operation with a resolvable session binds that session's tenant context
+
+**Status.** Accepted · **Date.** 2026-09-13 · **Deciders.** Chief Software Architect, Principal Security Architect
+
+**Context.** ADR-036's class G operations run without a principal: the sign-in page, the stylesheet, and — because a person whose credential must be changed is not yet fully authenticated — self-service account operations such as changing that credential or revoking a session. Those operations write audited rows, and the audit chain requires a tenant context to be bound. It was not, so the write raised `MissingTenantContextException` and the person was answered with a 500 at the one moment they were following instructions.
+
+**Decision.** The dispatcher resolves the session for a class G request when one is presented, and if a principal results, binds that principal's tenant context around the handler while still passing the request without a principal. The operation's class does not change: it remains callable with no session at all. What changes is that a session, when present, establishes the tenant the way it does for every other class.
+
+**Options considered.**
+
+| Option | Why not |
+|---|---|
+| Reclassify the account operations out of class G | They are reachable by a person who is not fully authenticated by design; class A would refuse them. |
+| Bind the deployment's tenant statically for class G | Correct on a single-tenant deployment and wrong the day it is not; the context must come from the caller. |
+
+**Consequences.**
+
+- **Accepted: class G is now two behaviours.** With no session, anonymous; with one, tenant-bound but principal-less. Both are stated on the dispatcher and tested.
+
+**Revisit if.** The platform serves more than one tenant from one process and a class G operation needs the tenant before any session exists — the sign-in page for a tenant chosen by host name, for instance.
+
+**References.** `SEC-TEN-004`, `PRD-PLT-012`, ADR-036, ADR-059.
+
+## ADR-074 — Reports are rendered per recipient by the worker; compositions are product-fixed and carry their basis
+
+**Status.** Accepted · **Date.** 2026-09-13 · **Deciders.** Chief Software Architect, Principal Security Architect
+
+**Context.** DOC-12 catalogues eleven reports, six scheduled, and requires that a scheduled report be generated per recipient with scope evaluated at generation (`PRD-DSH-043`), that delivery failure and a recipient who lost access be surfaced to the owner (`PRD-DSH-045`), and that audit evidence be assembled on request with its basis recorded and its generation audited (`PRD-DSH-046`, `PRD-DSH-047`). The platform had on-demand tabular exports and nothing scheduled.
+
+**Decision.** V077 and `aspm.app.reporting`. Five compositions — finding register, exception register, service level report, coverage report, audit evidence — each a workbook whose first sheet is About: kind, generated when and for whom, scope, period, filters, the aggregation basis, the coverage caveat, the generated-content label, the normalization statement, and the row count of every other sheet. A schedule names a composition, a subtree (or each recipient's whole reach), a period and a cadence; the worker claims due schedules and renders one artifact per live recipient, as that recipient, from that recipient's effective permissions and scope derived at that moment by the same code the session path uses. A recipient who no longer holds the composition's permission or whose scope no longer reaches the subtree is dropped with the reason and the owner is told. Files live in the export bucket under a per-tenant prefix; the artifact row carries the same basis as the About sheet; each generation is a `report.generated` audit event for the recipient it was rendered as. Audit evidence is the same renderer on demand: no finding text, no credential, no evidence body — evidence listed by identifier and hash (`PRD-DSH-048`).
+
+**Options considered.**
+
+| Option | Why not |
+|---|---|
+| One file per schedule, delivered to all recipients | "A disclosure to the least-authorized among them, and a delivered report cannot be recalled" (`PRD-DSH-043`). |
+| Tenant-configurable templates now (`PRD-DSH-041`, SHOULD) | Deferred. A template capability is where `PRD-DSH-042`'s four honesty mechanisms would first become removable; shipping fixed compositions first means there is nothing to remove them with, and the template design can start from a set of sheets that exist. |
+| Deliver the file by email | The channel of ADR-069 carries subject and link; a report as an attachment is content on a channel whose audience is not the recipient alone. The notification says the report is ready; the file is fetched by the recipient. |
+| Render at request time only | Loses the schedule, and with it the periodic obligation the catalogue exists to serve. |
+
+**Consequences.**
+
+- **Accepted: without an object store, scheduled reports fail.** They fail visibly — a `FAILED` artifact row and a notice to the owner — rather than being kept in the database as blobs. On-demand audit evidence still streams to the requester.
+- **Accepted: the period is days back from the run, in UTC.** A tenant whose month closes in another zone sees a boundary shifted by hours. Tenant-zone periods arrive with templates.
+- **Cost: two new permissions.** `rpt.schedule.manage` (a disclosure decision about who receives what) and `rpt.evidence.export` (reads access-review output and configuration history). Both granted at migration to roles holding user management.
+- **A recipient's effective principal is derived from role assignments at generation.** `IdentityService.effectivePrincipal` is the one derivation the session path and the report path share, so a revocation reaches both within the same bound (`SEC-SEC-011`).
+
+**Revisit if.** A customer requires branded or restructured output — the template capability, designed so the About sheet and its four mechanisms are not template content — or report volume moves rendering out of the general worker.
+
+**References.** `PRD-DSH-039`, `PRD-DSH-040`, `PRD-DSH-042`, `PRD-DSH-043`, `PRD-DSH-045`, `PRD-DSH-046`, `PRD-DSH-047`, `PRD-DSH-048`, `SEC-AUD-009`, `SEC-SEC-011`, ADR-054, ADR-069, V077.
+
+
+## ADR-075 — The deferred AI capabilities are delivered behind the built rails: provider families as adapters, the DOC-10 §8 capabilities on the ledger, a grounded question surface, budget and invocation records, and the harness
+
+**Status.** Accepted · **Date.** 2026-09-13 · **Deciders.** Chief Software Architect, Principal Security Architect
+
+**Context.** ADR-044 built the AI architecture and deferred the capabilities, recording as its negative consequence that it "weakens the initial commercial narrative for a product whose name describes AI" (risk R4). Five weeks on, the platform had the ledger, the catalogue, the provider row, the fence and the injection corpus — and one prompt, rules-based agents, a remediation draft that could not run, and no provider a customer would recognise. The product's own owner said, correctly, that the AI content was thin and the value low. The architecture's purpose was to make this step cheap and safe; this record is that step.
+
+The constraint is the one ADR-005 and DOC-10 §2 set and that nothing here relaxes: AI writes only to the ledger, holds no write grant, produces no number the platform did not compute, and is labelled wherever it appears. Every capability below runs through one call path with the budget, the cache, the fence, the anchor, the invented-number and contradiction checks, and the invocation record.
+
+**Decision.**
+
+1. **Provider families as adapters** (`aspm.app.ai.ModelClient`). Two wire shapes cover the market: OpenAI chat completions — OpenAI, Azure OpenAI, and every self-hosted server that imitates it (vLLM, Ollama, LiteLLM, llama.cpp, TGI, gateways) — and Anthropic messages. A tenant picks a family, a model and an endpoint; the kind list is product-fixed because a wire protocol is a product property, not tenant vocabulary. A private or plain-http endpoint — the self-hosted case `OQ-027` names — is accepted only when the OPERATOR vouches for it in `ASPM_MODEL_ENDPOINTS` (`PRD-AIC-025`), the same shape as the mail relays; a tenant cannot make the platform a request forger by naming an address.
+2. **The DOC-10 §8 capabilities, on the ledger.** Executive narrative (already model-backed; kept), remediation guidance (labelled ungrounded in the tenant's knowledge base, which does not exist yet — `PRD-AIC-017`'s "labelled or withheld"), score explanation over the recorded factor breakdown (`PRD-AIC-015`, ADR-038: the model may not restate the value), prioritization with a stated divergence from score order and every reference validated against the items given (`PRD-AIC-018`, `PRD-AIC-045`), semantic duplicate candidates from a structural shortlist (`PRD-AIC-016`, advisory), and classification from the tenant's own code lists with anything off-list rejected (`PRD-AIC-032`). Promotion of a classification applies it through the classifier's ordinary operation under the permission a person needs to do it by hand (`PRD-AIC-027`).
+3. **Two on-demand surfaces.** A grounded question over the posture (`PRD-AIC-057`, new in DOC-10 1.1.0): the platform composes the facts within the caller's scope, names them, and rejects any answer whose citation does not resolve, that cites nothing, or that carries a figure not in the facts. Drafting assistance (`PRD-AIC-019`): from the person's notes, a draft they edit; attributed as generated until they accept it, which the form does.
+4. **Invocation records, budget, cache, report** (V078). Every call — made, cached, or refused for budget — is a row with capability, principal, provider, model, prompt version, prompt hash, context references, data category, injection signals, outcome and tokens (`PRD-AIC-043`). A daily token ceiling and a per-person hourly limit stop a runaway loop with the reason stated (`PRD-AIC-053`, `PRD-AIC-054`); an identical request inside the window returns the recorded output (`PRD-AIC-055`); the egress report groups the rows by provider and data category (`PRD-AIC-044`).
+5. **The harness, runnable.** Fixed scenarios per capability — known facts, planted injections, insufficient data — scored on the §10.2 measures against the active provider on request, recorded against the model and prompt versions (`PRD-AIC-049`, `PRD-AIC-050`). A failing gate is reported, not acted on.
+
+**Options considered.**
+
+| Option | Why not |
+|---|---|
+| Keep deferring; ship rules only | The honest state until now, and the state the product's owner rejected. The architecture exists to make capability delivery safe; declining to deliver it makes the architecture a cost with no return. |
+| An agent framework or an orchestration library | ADR-057's reasoning again: the calls are two JSON shapes, and the controls that matter — fence, anchor, validation, budget — must be ours to read and to test. A framework's prompt assembly is the one thing the injection corpus cannot see. |
+| Let the model write to the finding when confidence is high | ADR-005 forbids it, and DOC-10 §6.2 explains why containment is the load-bearing control: a successful injection then produces a misleading narrative rather than a state change. Confidence is the model rating its own work. |
+| Retrieval over the tenant's knowledge base for remediation | The right design (`PRD-AIC-017`), and the knowledge base does not exist yet. Recall-based drafts are labelled ungrounded rather than withheld, so the capability is usable and honest; the label disappears when the source exists. |
+| Deliver the harness as a unit test only | A test with a fake provider proves the measures compute; it says nothing about the provider a tenant configured. The runnable harness answers the question the tenant actually has. |
+
+**Consequences.**
+
+- **Accepted: indirect prompt injection is mitigated, not solved.** `RISK-PLT-001` stands. The corpus grew with the two new fields and the harness plants injections, and a model that follows one is caught where the checks can see it — a changed severity, an invented number, a dropped fact — and not where they cannot.
+- **Accepted: quality is the provider's.** The platform validates shape, citations, figures and consistency; it cannot validate insight. The harness makes the provider's quality measurable per tenant, which is the most the platform can promise.
+- **Accepted: `RECORD` capabilities send finding text to the provider.** Titles and descriptions leave for classification, semantic duplicates, drafting and answers that name findings — only when the tenant's provider row allows record content, and the invocation record says when it did.
+- **Cost: a self-hosted endpoint is an operator decision, not a tenant one.** A tenant who wants its own inference server has to have the deployment vouch for its address. Deliberate: a private destination chosen through configuration is the request-forgery primitive `PRD-CON-032` names.
+- **Cost: a new permission, `aic.assist.use`,** for the two on-demand surfaces, granted where finding reading is. Not folded into the ledger permissions because asking a question is not judging a suggestion.
+- **ADR-044 is superseded in part.** Its deferral is lifted; its decision to build the architecture first is what made this record small.
+
+**Revisit if.** A tenant knowledge base lands (remediation grounding changes from recall to retrieval), a provider family appears that neither wire shape covers, or sampled human review of production output (`PRD-AIC-052`, still not built) shows a measure the harness's fixed scenarios do not catch.
+
+**References.** `PRD-AIC-014` through `PRD-AIC-019`, `PRD-AIC-021`, `PRD-AIC-022`, `PRD-AIC-023`, `PRD-AIC-025`, `PRD-AIC-026`, `PRD-AIC-027`, `PRD-AIC-030` through `PRD-AIC-038`, `PRD-AIC-043`, `PRD-AIC-044`, `PRD-AIC-045`, `PRD-AIC-049`, `PRD-AIC-050`, `PRD-AIC-051`, `PRD-AIC-053` through `PRD-AIC-057`, `PRD-CON-032`, ADR-005, ADR-038, ADR-044, ADR-052, ADR-057, ADR-067, `OQ-027`, V078.
+
+## ADR-076 — A planned window names who is expected to do it, as a soft reference; the plan is read per unit, team, person and month
+
+**Status.** Accepted · **Date.** 2026-09-13 · **Deciders.** Chief Software Architect, Principal Security Architect
+
+**Context.** ADR-065 gave the plan a stored, dated window and accepted as a consequence that the window carried no assignee, so the plan could not say whose fortnight a window was. Reported from use on 2026-09-13, in the reporter's words: the plan had to be readable as *"kế hoạch đánh giá định kỳ với từng application của từng business unit, từng team pentest phụ trách, từng nhân sự"* — the periodic plan per application, per business unit, per responsible pentest team, per person — with an overview first and the finest detail reachable from it, and with search over the application list because the list is long. Three things were missing: the window had no owner to group by; the page had no per-unit, per-team, per-person view at all; and the filter by team or assessor honoured only executed work (`assessment_request` participants), so a team with a full plan and no work yet done had an empty page.
+
+**Decision.** Two nullable columns on `assessment_plan_window` (V080): `team_id` and `assessor_principal_id`, both soft references (ADR-030) into the capacity module's `assessor_team` and the kernel's `principal`, both optional, both editable on the window until conversion. The read path joins them and renders a dangling reference as "(team no longer exists)" or "(person no longer exists)" rather than as no owner. The team and assessor filters of the plan now match an application when the team or person is a participant in a request on it **or** is named on a planned window for it or one of its projects. Each plan row carries the application's business unit — the ancestor one level below the tenant's root, chosen by closure depth so that the choice does not depend on how the tenant names its levels (ADR-027). The interface computes from the same fetched rows an overview grouped by business unit, by team, by person and by month, with the same coloured status strip per group, a count of applications due and unplanned per group, and a click that narrows the page to the group: organization, team and person through the server's filter parameters (`SEC-AUZ-016`: every chart is a count of the filtered population); month and "due and unplanned" in the browser, over rows already authorized.
+
+**Options considered.**
+
+| Option | Why not |
+|---|---|
+| An `assignee` on the window, with the semantics of a request assignee | A window is not work (ADR-065); an assignee implies a queue, an SLA clock and a notification. What a planner records is an expectation, and the request raised at conversion carries the real assignee under `PRD-ASM-018`. Two columns named for what they are cost nothing and mislead nobody. |
+| Foreign keys to `assessor_team` and `principal` | Cross-module (ADR-030). A disbanded team would then block on delete or cascade a plan away; the plan is a record of intention and outlives the roster. |
+| A server endpoint per grouping | Four endpoints computing four aggregates from the same rows, each a place for a filter to drift from the table under it (`PRD-ASM-024`). The rows are already fetched and authorized; the grouping is arithmetic. The month view is bounded to twelve months so the arithmetic stays small. |
+| Business unit as a configured "level" name | ADR-027: level names are tenant data. Depth below the root is a structural fact every tenant's tree has. A tenant whose second level is not what it calls a business unit sees its second level, correctly labelled by its own node name. |
+
+**Consequences.**
+
+- **Accepted: the owner on a window and the assignee on the request it becomes can differ, and nothing reconciles them.** The window records who was expected; the request records who did it. A report of the two side by side is the planned-versus-actual reading ADR-065 asked for, not a defect.
+- **Accepted: the roster shown in the picker is the active teams and their members at planning time.** A person who leaves keeps their name on the windows they were expected for, resolved through `principal`; the interface says so rather than reassigning silently.
+- **Accepted: two more nullable columns, and a `CASE WHEN ? THEN ? ELSE w.team_id END` in the update** so that a note edit does not un-assign. `PlanWindowTest` asserts the shape.
+- **Cost: the team/assessor filter now has two meanings folded into one parameter** — did work, or is planned to. The page says which rows are limited and why; a reader who needs only one of the two has the overview's own grouping.
+- **Colour is never the only carrier.** Each strip segment carries its count; the "unplanned due" figure is the column that turns red and is stated in digits; the row tint in the table repeats the status badge's label. A monochrome print reads.
+
+**Revisit if.** Capacity planning wants load per person per month against declared availability (`OQ-019`), at which point the window's owner becomes an input to a computation rather than a label, and the soft reference needs a reconciliation job rather than a fallback string.
+
+**References.** `PRD-ASM-015`, `PRD-ASM-018`, `PRD-ASM-024`, `PRD-ASM-026`, `SEC-AUZ-016`, ADR-027, ADR-030, ADR-065, V080.
+
 ## Change History
 
 | Version | Date | Author | Change | Reviewer |
 |---|---|---|---|---|
+| 1.9.0 | 2026-09-13 | Chief Software Architect, Principal Security Architect | Added ADR-076, giving the planned window an optional expected team and assessor as soft references and the plan a per-unit, per-team, per-person, per-month reading; ADR-065 marked superseded in part for its "no assignee" consequence, with the record retained. 76 expanded records. | Pending |
+| 1.8.0 | 2026-09-13 | Chief Software Architect, Principal Security Architect | Added ADR-075, delivering the AI capabilities ADR-044 deferred and marking ADR-044 superseded in part — the deferral only; the architecture-first decision and all its properties stand, and the record says so on ADR-044 itself rather than leaving a reader to infer which half changed. The record is explicit about what it does not relax (ADR-005, no write grant, no generated figure, labelling) and about the two costs a tenant will meet first: a self-hosted endpoint is vouched for by the operator, not chosen by the tenant, and RECORD capabilities send finding text to the provider the tenant named. Residual risk RISK-PLT-001 is restated as standing. 70 expanded records — counted from the headings. | Pending |
+| 1.7.0 | 2026-09-13 | Chief Software Architect, Principal Security Architect | Added ADR-067 through ADR-074, each recording a capability the corpus specified and the running platform lacked, built as options rather than as a vendor: the secrets contract with a platform-sealed default and four enterprise stores as adapters, which answers `OQ-026` by the option set (ADR-067); OIDC federation with presets as data and ADR-059 retained for local and break-glass access (ADR-068); notification channels as shipped adapters over an outbox, realising ADR-054 (ADR-069); outbound connectors behind one contract with the reference one-way and divergence a decision for a person (ADR-070); the same artifact deployed as the DOC-15 runtime units behind a mesh, with the chart generated from the deployment model (ADR-071); the registered exemption for unforced tables (ADR-072); tenant context for class G operations with a session (ADR-073); and reports rendered per recipient with product-fixed compositions that carry their basis (ADR-074). Two records state a defect they close rather than only a decision: ADR-072 a conformance check failing on correct tables, ADR-073 a 500 answered to a person changing an expired credential. What is deferred is stated in each record — SCIM, SAML, report templates, the separate match and projection units — with the reason. **The index was also completed:** it stopped at ADR-059 while records 060–066 existed with change-history rows, so seven rows were added for them; nothing in those records changed. 69 expanded records — counted from the headings. | Pending |
 | 1.6.0 | 2026-08-27 | Chief Software Architect, Principal Security Architect | Added ADR-066, admitting a third state into the coverage figures: a review the platform did not observe, asserted by an attributed person. The record separates two cases the report conflated — a request already in the platform whose reason was never recorded, which needed no change because the board already filters on trigger = none, and an assessment predating the platform, which had no path at all. Importing history as completed requests is recorded as rejected: it would write a workflow history nobody lived into the transition log PRD-PLT-001 names as unreconstructable. Two consequences are stated as accepted costs rather than solved: an attestation is unverifiable by construction, mitigated by disclosure and not by validation; and `last_full_review_at` changed what it computes, so any consumer that reads it without the new source column will present an assertion as evidence. A new permission is added deliberately rather than reused, at the cost of every tenant having to grant it. 61 expanded records — counted from the headings. | Pending |
 | 1.5.0 | 2026-08-25 | Chief Software Architect, Principal Security Architect | Added ADR-065, recording the assessment plan as a stored dated intention rather than a draft request or a recurrence rule. The record states the defect it closes rather than only the decision it takes: because the only way to schedule was the intake form, and the form correctly requires a scope descriptor and a type payload, a year could not be planned at all and the periodic obligation V024 exists to measure was tracked in a spreadsheet. Two alternatives are recorded as rejected with the reason — draft requests, which would put a year of plan into every in-flight figure and let the plan silently become whatever happened; and a recurrence rule, which would rewrite last quarter's plan the day somebody edited the rule. One defect found during verification is recorded in the consequences rather than fixed silently: an UPDATE matching no rows left its transaction open, so the intended 404 for an unknown window reached the client as a 500. 60 expanded records — counted from the headings, not carried forward. | Pending |
 | 1.4.0 | 2026-08-25 | Chief Software Architect, Principal Security Architect | Added ADR-062, ADR-063 and ADR-064, each recording a defect reproduced against a running deployment rather than a decision taken in the abstract. ADR-062: a unique-identity violation reaches the client as `500 INTERNAL_ERROR`, because the dispatcher maps `23503` and no other SQL state — so a duplicate create is indistinguishable from a server fault and is the one status a client is supposed to retry. The repair is constrained by `SEC-AUZ-020`: naming the conflicting record would turn the create endpoint into an existence oracle for records outside the caller's scope. ADR-063: `PRD-API-005` requires a repeated idempotency key to return the original outcome; the dispatcher validates the key's shape, namespaces it, and executes the request anyway, so the requirement is met by exactly one endpoint that implements the check itself. ADR-064: two writers derive `REPOSITORY` identity by two different rules, one of them from the display name that `PRD-AST-006` forbids, which has been producing duplicate assets — the estate carries a `repo:` prefix stacked three deep on one repository, and two further duplicates were reproduced during verification. **59 expanded records, and the figure in the row below is corrected.** The running count had drifted: ADR-057, ADR-058 and ADR-059 were added with complete records and no change-history row, so 1.2.0's "52" understated by three, and 1.3.0 — written by the same hand as this row — copied the previous row's arithmetic instead of counting the file, giving 53 where it held 56. 1.3.0 is corrected in place with the superseded figure left visible; 1.2.0 and earlier are left exactly as written, because a change history records what was said at the time and rewriting older entries would destroy the evidence that the drift happened. Counted, not derived: 59 headings, with 008, 014, 015, 018 and 025 cross-referenced rather than expanded. | Pending |

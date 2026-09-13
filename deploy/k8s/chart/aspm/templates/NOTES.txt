@@ -1,0 +1,24 @@
+AI ASPM {{ .Chart.AppVersion }} — release {{ .Release.Name }} in {{ .Release.Namespace }}
+
+Units deployed (from files/model.yaml, generated from the DOC-15 runtime-unit model):
+  app     ASPM_ROLE=app     replicas {{ .Values.replicas.app }}   egress: identity provider, secrets store, key management
+  worker  ASPM_ROLE=worker  replicas {{ .Values.replicas.worker }}   egress: connectors, webhooks, mail relay, model provider, secrets, keys
+
+Options in force:
+  ingress   {{ .Values.ingress.kind }} on {{ .Values.ingress.host }}
+  mesh      {{ .Values.mesh.kind }}
+  secrets   {{ .Values.secrets.provider }}{{ if .Values.secrets.csi.enabled }} via CSI ({{ .Values.secrets.csi.providerClassName }}){{ end }}
+  postgres  {{ .Values.postgres.host }}:{{ .Values.postgres.port }}/{{ .Values.postgres.database }}
+
+The migrate hook applied every migration as {{ .Values.postgres.migrateUser }} and the conformance hook
+ran as {{ .Values.postgres.verifyUser }}; a failure in either fails the release (OPS-DEP-031).
+
+Sign in at {{ .Values.publicBaseUrl }} as the bootstrapped administrator; the first sign-in enrols a
+second factor and forces a credential change. Configure identity providers under Access →
+Identity providers (redirect URI {{ .Values.publicBaseUrl }}/auth/callback) and notification
+channels under Configuration → Notifications.
+
+What this chart does NOT do — read deploy/k8s/README.md:
+  - provision PostgreSQL, Valkey or the object store (bring managed services, or the dev instance)
+  - create the five database group roles and three login roles (deploy/postgres/01-login-roles.sh, run once by a DBA)
+  - deploy match, projection or scheduler units (modelled in DOC-15 §4, not yet separate processes)

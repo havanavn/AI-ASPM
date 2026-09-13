@@ -61,6 +61,13 @@ public enum FailureClass {
     DATA(0, Duration.ZERO, false, false),
 
     /**
+     * The target rejected the configuration itself: endpoint not found, project or table unknown,
+     * schema mismatch. <b>No retry.</b> DOC-21 §5: "Unhealthy; diagnosis surfaced". Retrying cannot
+     * succeed until an administrator changes something ({@code PRD-CON-017}).
+     */
+    CONFIGURATION(0, Duration.ZERO, true, true),
+
+    /**
      * The target returned something the connector cannot interpret, or the platform's own configuration is
      * wrong. Retried once, because a single malformed response is occasionally transient and a persistent one
      * needs a human either way.

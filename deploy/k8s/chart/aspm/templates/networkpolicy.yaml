@@ -1,0 +1,145 @@
+{{- /*
+OPS-DEP-014: egress deny-by-default with an allowlist PER RUNTIME UNIT, generated from the model.
+OPS-DEP-015: internal and link-local ranges unreachable from units processing user-supplied
+destinations — the application's EgressGuard refuses them at the application layer; this policy
+refuses them at the network layer, and the two are meant to disagree with an attacker together.
+
+For each shipped unit: deny all ingress and egress, then allow exactly
+  - DNS to the cluster resolver,
+  - the data tier (store, cache, object store) for units that hold the database credential,
+  - ingress from the gateway for the unit that serves HTTP,
+  - one egress rule per destination CLASS the model grants the unit, resolved to the CIDR/port pairs
+    the operator provided in values. A class with no CIDRs is unreachable, which is what "not offered
+    in this deployment" means and how an air-gapped topology is expressed.
+*/ -}}
+{{- $model := include "aspm.model" . | fromJson -}}
+{{- range $name, $unit := $model.units }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "aspm.fullname" $ }}-{{ $name }}
+  labels:
+    {{- include "aspm.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+  annotations:
+    aspm.io/model-unit: {{ $unit.modelUnit }}
+    aspm.io/egress-classes: {{ join "," $unit.egress | quote }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "aspm.unitLabels" (dict "root" $ "unit" $name) | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    {{- if $unit.servesHttp }}
+    # From the gateway / ingress controller and from within the namespace (mesh sidecars, probes).
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - port: 8080
+          protocol: TCP
+    {{- else }}
+    # Probes only: the kubelet is not a pod, so a probe needs no ingress rule; nothing else may call.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "aspm.unitLabels" (dict "root" $ "unit" $name) | nindent 14 }}
+      ports:
+        - port: 8080
+          protocol: TCP
+    {{- end }}
+  egress:
+    # DNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $.Values.egress.dnsNamespace }}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    {{- if $unit.holdsDatabaseCredential }}
+    # The operational store. OPS-DEP-009: the credential this unit holds is app_runtime, which does not
+    # bypass row-level security; the bypass roles are not in any runtime environment.
+    - to:
+        - ipBlock:
+            cidr: {{ $.Values.postgres.cidr }}
+      ports:
+        - port: {{ $.Values.postgres.port }}
+          protocol: TCP
+    - to:
+        - ipBlock:
+            cidr: {{ $.Values.valkey.cidr }}
+      ports:
+        - port: 6379
+          protocol: TCP
+    - to:
+        - ipBlock:
+            cidr: {{ $.Values.objectStore.cidr }}
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 9000
+          protocol: TCP
+    {{- end }}
+    {{- range $class := $unit.egress }}
+    {{- $dest := index $.Values.egress.destinations $class }}
+    {{- if and $dest $dest.cidrs $dest.ports }}
+    # {{ $class }}
+    - to:
+        {{- range $cidr := $dest.cidrs }}
+        - ipBlock:
+            cidr: {{ $cidr }}
+            {{- if eq $cidr "0.0.0.0/0" }}
+            # OPS-DEP-015: a class that may reach the Internet still may not reach the cluster, the
+            # link-local range (cloud metadata) or private space.
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+            {{- end }}
+        {{- end }}
+      ports:
+        {{- range $port := $dest.ports }}
+        - port: {{ $port }}
+          protocol: TCP
+        {{- end }}
+    {{- end }}
+    {{- end }}
+{{- end }}
+---
+# Everything else in the namespace that is not a shipped unit (jobs) gets deny-all ingress and the
+# data-tier egress it needs; the migrate and conformance jobs are covered below by their own policy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "aspm.fullname" . }}-jobs
+  labels:
+    {{- include "aspm.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      aspm.io/job: "true"
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.egress.dnsNamespace }}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.postgres.cidr }}
+      ports:
+        - port: {{ .Values.postgres.port }}
+          protocol: TCP

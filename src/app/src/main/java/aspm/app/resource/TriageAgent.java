@@ -49,8 +49,29 @@ public final class TriageAgent {
     public static final String IDENTITY = "deterministic-rules/v1";
 
     /** The result of one run, for the caller to report. */
-    public record Run(String capability, int considered, int proposed, int skipped, String detail) {
+    public record Run(String capability, int considered, int proposed, int skipped, String detail,
+            boolean throttled, int retryAfterSeconds) {
+        public Run(String capability, int considered, int proposed, int skipped, String detail) {
+            this(capability, considered, proposed, skipped, detail, false, 0);
+        }
     }
+
+    /**
+     * Capabilities that answer a person's request from the interface — a typed question, a draft
+     * button — and have nothing to do in a batch. Listed so a surface run neither "runs" them nor
+     * reports them as lacking an implementation.
+     */
+    public static final java.util.Set<String> ON_DEMAND = java.util.Set.of("posture.answer", "drafting.assist");
+
+    /** Capabilities that call the model. A provider that is rate limiting stops the rest of these. */
+    public static final java.util.Set<String> MODEL_BACKED = java.util.Set.of("narrative.draft", "remediation.draft",
+            "score.explanation", "priority.suggestion", "duplicate.semantic", "classification.assist");
+
+    /** The provider's last "slow down" on this thread: the detail and how long it asked for. */
+    private record Throttle(String detail, int retryAfterSeconds) {
+    }
+
+    private static final ThreadLocal<Throttle> THROTTLE = new ThreadLocal<>();
 
     private final DataSource dataSource;
     private final SuggestionLedger ledger;
@@ -102,6 +123,7 @@ public final class TriageAgent {
             }
             int cap = (int) capability.get("max_per_run");
             injectionSignals.remove();
+            THROTTLE.remove();
             // Read from the CATALOGUE, not passed in by the caller. It decides whether record content
             // may reach a model at all, and a value a caller could choose is not a control.
             String dataCategory = String.valueOf(capability.get("data_category"));
@@ -116,9 +138,24 @@ public final class TriageAgent {
                     case "narrative.draft" -> narrative(principal, connection, cap, dataCategory);
                     case "remediation.draft" ->
                             remediation(principal, connection, cap, dataCategory);
+                    case "score.explanation" -> scoreExplanation(principal, connection, cap, dataCategory);
+                    case "priority.suggestion" -> prioritySuggestion(principal, connection, cap, dataCategory);
+                    case "duplicate.semantic" -> semanticDuplicates(principal, connection, cap, dataCategory);
+                    case "classification.assist" -> classificationAssist(principal, connection, cap);
+                    case "posture.answer", "drafting.assist" -> new Run(code, 0, 0, 0,
+                            "answers on demand from the interface; there is nothing to run in a batch");
                     default -> new Run(code, 0, 0, 0,
                             "this capability has no rules implementation and needs a model provider");
                 };
+                Throttle throttle = THROTTLE.get();
+                if (throttle != null) {
+                    // Said on the run itself, not only inside the detail sentence: the button reads
+                    // this flag to tell the person the model was cut short and when to press again.
+                    result = new Run(result.capability(), result.considered(), result.proposed(),
+                            result.skipped(), result.detail() + " — the provider rate-limited the model ("
+                                    + throttle.detail() + "); the rest fell back to the rules",
+                            true, throttle.retryAfterSeconds());
+                }
 
                 // *** WHAT RAN, OVER WHAT, AT WHOSE REQUEST. ***
                 //
@@ -171,11 +208,30 @@ public final class TriageAgent {
      */
     public List<Run> runSurface(Principal principal, String surface) throws SQLException {
         List<Run> out = new ArrayList<>();
+        // Rules first, then the model-backed ones. The rules never fail for want of a provider, and
+        // the narrative needs the coverage caveat the rules write; a provider that is rate limiting
+        // then stops the model-backed remainder instead of collecting one 429 per capability.
+        List<SuggestionLedger.Capability> enabled = new ArrayList<>();
         for (var capability : ledger.capabilitiesFor(principal, surface)) {
-            if (!capability.enabled()) {
+            if (capability.enabled() && !ON_DEMAND.contains(capability.code())) {
+                enabled.add(capability);
+            }
+        }
+        enabled.sort(java.util.Comparator.comparing((SuggestionLedger.Capability c) -> MODEL_BACKED.contains(c.code()))
+                .thenComparing(SuggestionLedger.Capability::code));
+        Throttle throttle = null;
+        for (var capability : enabled) {
+            if (throttle != null && MODEL_BACKED.contains(capability.code())) {
+                out.add(new Run(capability.code(), 0, 0, 0, "not attempted: the provider is rate limiting ("
+                        + throttle.detail() + "); press again after the wait", true, throttle.retryAfterSeconds()));
                 continue;
             }
-            out.add(run(principal, capability.code()));
+            Run run = run(principal, capability.code());
+            out.add(run);
+            if (run.throttled()) {
+                throttle = new Throttle(run.retryAfterSeconds() > 0
+                        ? "retry after " + run.retryAfterSeconds() + " s" : "HTTP 429", run.retryAfterSeconds());
+            }
         }
         return List.copyOf(out);
     }
@@ -701,7 +757,7 @@ public final class TriageAgent {
                 injectionSignals.set(Integer.valueOf(injectionSignals.get().intValue()
                         + ModelNarrator.injectionSignals(untrusted)));
 
-                Object narrated = narrator.narrate(principal,
+                Object narrated = narrator.narrate(principal, "remediation.draft",
                         "Write remediation guidance for this weakness: what to change, and what to "
                         + "check afterwards. Address the engineer who owns the code.",
                         facts, untrusted, dataCategory);
@@ -712,6 +768,9 @@ public final class TriageAgent {
                     withheld += 1;
                     if (narrated instanceof ModelNarrator.Refusal refused) {
                         lastRefusal = refused.code();
+                        if (rateLimited(refused)) {
+                            break;
+                        }
                     }
                     continue;
                 }
@@ -720,9 +779,11 @@ public final class TriageAgent {
                         (UUID) row[0],
                         "Suggested remediation for a " + row[4] + " finding",
                         written.text(),
-                        "This is a draft for the owning engineer to judge, not an instruction. "
-                                + "Nothing about the finding has changed; accepting records that you "
-                                + "read it and found it sound.",
+                        "This is a draft for the owning engineer to judge, not an instruction. It is "
+                                + "UNGROUNDED in this tenant's knowledge base (PRD-AIC-017): it comes from the "
+                                + "model's general knowledge of the weakness class, not from your standards. "
+                                + "Nothing about the finding has changed; accepting records that you read it "
+                                + "and found it sound.",
                         List.of("finding:" + row[0], "severity:" + row[4],
                                 "class:" + row[3], "asset:" + row[5],
                                 "cwe:" + row[7], "internet-facing:" + (exposed ? "yes" : "no"),
@@ -860,7 +921,7 @@ public final class TriageAgent {
                 // text in instruction position, which is what PRD-AIC-037 forbids — and it was here.
                 Map<String, String> untrusted =
                         Map.of("organization_name", String.valueOf(row[1]));
-                Object narrated = narrator.narrate(principal,
+                Object narrated = narrator.narrate(principal, "narrative.draft",
                         "Summarise where this organization stands on open security weaknesses for the "
                         + "person who owns it.", facts, untrusted, dataCategory);
                 if (narrated instanceof ModelNarrator.Narration written) {
@@ -916,6 +977,354 @@ public final class TriageAgent {
             outcome = "nothing new to describe";
         }
         return new Run("narrative.draft", considered, proposed, considered - proposed, outcome);
+    }
+
+
+    // ==============================================================================================
+    // ADR-075: the DOC-10 §8 capabilities that need a model, each with the rules baseline it improves on
+    // ==============================================================================================
+
+    /**
+     * {@code PRD-AIC-015}. The recorded factor breakdown is the ONLY source; the model puts it in the
+     * reader's words and may not restate or recalculate the value (ADR-038). The rules baseline is the
+     * factor table as a sentence, so a tenant without a provider still gets the explanation.
+     */
+    private Run scoreExplanation(Principal principal, Connection connection, int cap, String dataCategory)
+            throws SQLException {
+        var scoring = new RiskScoring(ledgerDataSource());
+        List<RiskScoring.Score> scores = scoring.topFindings(principal, cap);
+        int considered = 0;
+        int proposed = 0;
+        int byModel = 0;
+        String lastRefusal = null;
+        for (RiskScoring.Score score : scores) {
+            considered += 1;
+            List<String> facts = ModelNarrator.facts(
+                    "score: " + score.score() + " of 100, band " + score.scoreBand(),
+                    "recorded severity: " + score.severity(),
+                    "asset exposure: " + score.exposure(),
+                    "asset criticality: " + score.criticality(),
+                    "factor weights in this model: severity 30, exposure 15, criticality 15 (of a full model of 100)",
+                    "factors not yet measured and therefore absent from the score: " + String.join(", ", RiskScoring.ABSENT_FACTORS),
+                    "factor coverage: " + Math.round(score.factorCoverage() * 100) + " percent of the full model",
+                    "scoring model version: " + score.modelVersion());
+            String detail = "Score " + score.score() + " (" + score.scoreBand() + ") comes from three recorded factors: severity "
+                    + score.severity() + ", exposure " + score.exposure() + ", criticality " + score.criticality() + ". "
+                    + "Exploit prediction, known-exploited status and data sensitivity are not measured yet, so the score covers "
+                    + Math.round(score.factorCoverage() * 100) + " percent of the full model and should be read as provisional.";
+            String identity = IDENTITY;
+            String promptVersion = "score-explanation/rules-1";
+            Object narrated = narrator.narrate(principal, "score.explanation",
+                    "Explain to the engineer who owns this finding why it carries this risk score: which recorded factor "
+                            + "contributes most, what the absent factors mean for how much to trust it, and what would move it. "
+                            + "Do not restate the score as a different number and do not compute anything.",
+                    facts, Map.of(), dataCategory);
+            if (narrated instanceof ModelNarrator.Narration written) {
+                detail = written.text();
+                identity = written.modelIdentity();
+                promptVersion = written.promptVersion();
+                byModel += 1;
+            } else if (narrated instanceof ModelNarrator.Refusal refused) {
+                lastRefusal = refused.code();
+                if (rateLimited(refused)) {
+                    break;   // PRD-CON-027: the provider asked us to slow down; the rest of the batch waits for the next run
+                }
+            }
+            var draft = new SuggestionLedger.Draft("SCORE_EXPLANATION", "FINDING", score.findingId(),
+                    "Why this scores " + score.score() + " (" + score.scoreBand() + ")",
+                    detail,
+                    "An explanation of a computed figure, not a proposal to change it (PRD-AIC-015). Accepting records that the "
+                            + "explanation was read and matches the factor table.",
+                    List.of("finding:" + score.findingId(), "score:" + score.score(), "severity:" + score.severity(),
+                            "exposure:" + score.exposure(), "criticality:" + score.criticality(),
+                            "model:" + score.modelVersion(), "written-by:" + identity),
+                    "HIGH");
+            if (ledger.propose(connection, draft, identity, promptVersion)) {
+                proposed += 1;
+            }
+        }
+        return new Run("score.explanation", considered, proposed, considered - proposed,
+                considered == 0 ? "no open scored finding in scope"
+                        : proposed + " explanation(s) proposed for " + considered + " finding(s); " + provenance(byModel, proposed, lastRefusal));
+    }
+
+    /**
+     * {@code PRD-AIC-018}, {@code PRD-AIC-045}. An ordering with a reason per item over the highest-scoring
+     * open findings of each root organization, with their service level state. The model may diverge from
+     * score order and MUST say why; every item it names must be one it was given (citation validity,
+     * DOC-10 §10.2, 100%). Rules baseline: score order.
+     */
+    private Run prioritySuggestion(Principal principal, Connection connection, int cap, String dataCategory)
+            throws SQLException {
+        int considered = 0;
+        int proposed = 0;
+        int byModel = 0;
+        String lastRefusal = null;
+        List<Object[]> roots = new ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT id, name FROM org_node WHERE parent_id IS NULL AND id = ANY (?) ORDER BY name LIMIT ?")) {
+            statement.setArray(1, connection.createArrayOf("uuid", principal.scopeNodeIds().toArray()));
+            statement.setInt(2, cap);
+            try (ResultSet r = statement.executeQuery()) {
+                while (r.next()) {
+                    roots.add(new Object[] {r.getObject(1, UUID.class), r.getString(2)});
+                }
+            }
+        }
+        var scoring = new RiskScoring(ledgerDataSource());
+        for (Object[] root : roots) {
+            UUID rootId = (UUID) root[0];
+            // The recipient's whole reach, narrowed to this root: the principal's scope is what the scoring reads.
+            Principal narrowed = new Principal(principal.tenantId(), principal.principalId(), principal.permissions(), java.util.Set.of(rootId),
+                    principal.stepUpAuthenticated(), principal.serviceCredential(), principal.credentialChangeRequired());
+            List<RiskScoring.Score> top = scoring.topFindings(narrowed, 10);
+            if (top.size() < 2) {
+                continue;
+            }
+            considered += 1;
+            Map<String, RiskScoring.Score> byRef = new LinkedHashMap<>();
+            List<String> facts = new ArrayList<>();
+            facts.add("items are named F1..F" + top.size() + " in score order; use only these names");
+            int n = 1;
+            for (RiskScoring.Score score : top) {
+                String ref = "F" + n++;
+                byRef.put(ref, score);
+                facts.add(ref + ": score " + score.score() + " " + score.scoreBand() + ", severity " + score.severity() + ", exposure "
+                        + score.exposure() + ", criticality " + score.criticality() + ", service level " + serviceLevel(connection, score.findingId()));
+            }
+            StringBuilder detail = new StringBuilder("Score order: ");
+            for (String ref : byRef.keySet()) {
+                detail.append(ref).append(" (").append(byRef.get(ref).score()).append(") ");
+            }
+            detail.append("— the deterministic order; no model reasoning was applied.");
+            String identity = IDENTITY;
+            String promptVersion = "priority-suggestion/rules-1";
+            List<String> grounding = new ArrayList<>();
+            grounding.add("org:" + root[1]);
+            byRef.forEach((ref, score) -> grounding.add(ref + ":finding:" + score.findingId()));
+            Object out = narrator.structured(principal, "priority.suggestion", "priority-suggestion/v1",
+                    "Propose the order in which the owning team should work these findings. Start from score order; move an item "
+                            + "only for a reason visible in the FACTS (a breached or due service level, internet exposure, criticality). "
+                            + "For every move away from score order, state the reason.",
+                    facts, Map.of(), dataCategory,
+                    "{\"order\": [{\"ref\": <F-name>, \"reason\": <one sentence>}], \"divergence\": <one sentence on where and why the order "
+                            + "differs from score order, or 'none'>}", 900);
+            if (out instanceof ModelNarrator.Structured structured) {
+                List<String> lines = new ArrayList<>();
+                boolean valid = structured.json().get("order") instanceof List<?> list && !list.isEmpty();
+                java.util.Set<String> seen = new java.util.HashSet<>();
+                if (valid) {
+                    for (Object item : (List<?>) structured.json().get("order")) {
+                        if (!(item instanceof Map<?, ?> m) || !byRef.containsKey(String.valueOf(m.get("ref"))) || !seen.add(String.valueOf(m.get("ref")))) {
+                            valid = false;   // PRD-AIC-033: a reference that does not resolve rejects the whole output
+                            break;
+                        }
+                        String reason = m.get("reason") == null ? "" : String.valueOf(m.get("reason"));
+                        if (ModelNarrator.inventedFigure(reason, facts, "") != null) {
+                            valid = false;
+                            break;
+                        }
+                        RiskScoring.Score score = byRef.get(String.valueOf(m.get("ref")));
+                        lines.add(m.get("ref") + " — " + score.title() + " (score " + score.score() + "): " + reason);
+                    }
+                }
+                if (valid && seen.size() == byRef.size()) {
+                    String divergence = String.valueOf(structured.json().getOrDefault("divergence", "none"));
+                    detail = new StringBuilder(String.join("\n", lines));
+                    detail.append("\n\nDivergence from score order (PRD-AIC-045): ").append(divergence);
+                    identity = structured.modelIdentity();
+                    promptVersion = structured.promptVersion();
+                    byModel += 1;
+                } else {
+                    lastRefusal = "INVALID_ORDER";
+                    narrator.reject(principal, structured.invocationId(), "INVALID_ORDER");
+                }
+            } else if (out instanceof ModelNarrator.Refusal refused) {
+                lastRefusal = refused.code();
+                if (rateLimited(refused)) {
+                    break;
+                }
+            }
+            var draft = new SuggestionLedger.Draft("PRIORITY_SUGGESTION", "ORG_NODE", rootId,
+                    "Suggested working order for " + root[1] + " (" + top.size() + " highest-scoring findings)",
+                    detail.toString(),
+                    "A suggested order, not a change to any score or service level (PRD-AIC-018). Where it differs from score "
+                            + "order, the reason is stated; if the reason does not hold, dismiss it.",
+                    grounding, "MEDIUM");
+            if (ledger.propose(connection, draft, identity, promptVersion)) {
+                proposed += 1;
+            }
+        }
+        return new Run("priority.suggestion", considered, proposed, considered - proposed,
+                considered == 0 ? "no organization in scope has two or more open scored findings"
+                        : proposed + " ordering(s) proposed; " + provenance(byModel, proposed, lastRefusal));
+    }
+
+    private static String serviceLevel(Connection connection, UUID findingId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT state, CASE WHEN breached_at IS NOT NULL THEN 'breached' WHEN due_at < now() THEN 'past due' "
+                        + "WHEN due_at < now() + interval '7 days' THEN 'due within 7 days' ELSE 'on track' END "
+                        + "FROM service_level_clock WHERE subject_kind = 'FINDING' AND subject_id = ? AND resolved_at IS NULL ORDER BY due_at LIMIT 1")) {
+            statement.setObject(1, findingId);
+            try (ResultSet r = statement.executeQuery()) {
+                return r.next() ? r.getString(2) : "no clock";
+            }
+        }
+    }
+
+    /**
+     * {@code PRD-AIC-016} from the text: pairs the structural rules cannot see. A cheap shortlist —
+     * same scope, both open, some title word in common — then the model judges each pair from title
+     * and description (RECORD: sent only when the tenant allows it). Advisory only: the dedup
+     * decision stays deterministic and a promoted suggestion changes no identity.
+     */
+    private Run semanticDuplicates(Principal principal, Connection connection, int cap, String dataCategory)
+            throws SQLException {
+        int considered = 0;
+        int proposed = 0;
+        String lastRefusal = null;
+        List<Object[]> pairs = new ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT a.id, a.title, coalesce(a.description, ''), b.id, b.title, coalesce(b.description, ''), n.name
+                  FROM finding a JOIN finding b ON b.scope_node_id = a.scope_node_id AND b.id > a.id
+                  JOIN org_node n ON n.id = a.scope_node_id
+                 WHERE a.state = 'OPEN' AND b.state = 'OPEN'
+                   AND a.finding_class <> 'SECRET' AND b.finding_class <> 'SECRET'
+                   AND a.fingerprint_digest <> b.fingerprint_digest
+                   AND a.scope_node_id IN (SELECT descendant_id FROM org_closure WHERE ancestor_id = ANY (?))
+                   AND EXISTS (SELECT 1 FROM regexp_split_to_table(lower(a.title), '[^a-z0-9]+') w
+                                WHERE length(w) >= 5 AND position(w IN lower(b.title)) > 0)
+                   -- `@>` and not the `?` operator: the JDBC driver would read `?` as a parameter marker.
+                   AND NOT EXISTS (SELECT 1 FROM ai_suggestion s WHERE s.suggestion_kind = 'DUPLICATE_CANDIDATE'
+                                    AND s.subject_id = b.id AND s.grounding_refs @> to_jsonb(ARRAY['finding:' || a.id::text]))
+                 ORDER BY a.first_detected_at DESC
+                 LIMIT ?
+                """)) {
+            statement.setArray(1, connection.createArrayOf("uuid", principal.scopeNodeIds().toArray()));
+            statement.setInt(2, cap);
+            try (ResultSet r = statement.executeQuery()) {
+                while (r.next()) {
+                    pairs.add(new Object[] {r.getObject(1, UUID.class), r.getString(2), r.getString(3), r.getObject(4, UUID.class),
+                            r.getString(5), r.getString(6), r.getString(7)});
+                }
+            }
+        }
+        for (Object[] pair : pairs) {
+            considered += 1;
+            Map<String, String> untrusted = new LinkedHashMap<>();
+            untrusted.put("finding_title", pair[1] + " ||| " + pair[4]);
+            untrusted.put("finding_description", pair[2] + " ||| " + pair[5]);
+            injectionSignals.set(Integer.valueOf(injectionSignals.get().intValue() + ModelNarrator.injectionSignals(untrusted)));
+            Object out = narrator.structured(principal, "duplicate.semantic", "duplicate-semantic/v1",
+                    "Two findings from the same organization are in the fenced content, separated by '|||' (first, then second), title "
+                            + "then description. Decide whether they describe the SAME weakness in the same place — the same flaw reported "
+                            + "twice — or different weaknesses. Same class of flaw in different places is NOT a duplicate.",
+                    ModelNarrator.facts("organization: " + pair[6], "both findings are open"), untrusted, dataCategory,
+                    "{\"duplicate\": <true|false>, \"confidence\": <\"HIGH\"|\"MEDIUM\"|\"LOW\">, \"reason\": <one sentence>}", 200);
+            if (!(out instanceof ModelNarrator.Structured structured)) {
+                if (out instanceof ModelNarrator.Refusal refused) {
+                    lastRefusal = refused.code();
+                    if (rateLimited(refused)) {
+                        break;
+                    }
+                }
+                continue;
+            }
+            if (!Boolean.TRUE.equals(structured.json().get("duplicate"))) {
+                continue;
+            }
+            String confidence = String.valueOf(structured.json().getOrDefault("confidence", "LOW"));
+            if (!List.of("HIGH", "MEDIUM", "LOW").contains(confidence)) {
+                narrator.reject(principal, structured.invocationId(), "OFF_LIST_CONFIDENCE");   // PRD-AIC-032: not on the list, rejected
+                continue;
+            }
+            String reason = String.valueOf(structured.json().getOrDefault("reason", ""));
+            var draft = new SuggestionLedger.Draft("DUPLICATE_CANDIDATE", "FINDING", (UUID) pair[3],
+                    "Possibly the same weakness as “" + pair[1] + "”",
+                    "Judged from the two write-ups: " + reason,
+                    "Advisory only (PRD-AIC-016). If they are one weakness, close the newer one as a duplicate through the finding's "
+                            + "own transition; nothing here changes either record.",
+                    List.of("finding:" + pair[0], "finding:" + pair[3], "org:" + pair[6], "written-by:" + structured.modelIdentity()),
+                    "HIGH".equals(confidence) ? "MEDIUM" : "LOW");
+            if (ledger.propose(connection, draft, structured.modelIdentity(), structured.promptVersion())) {
+                proposed += 1;
+            }
+        }
+        return new Run("duplicate.semantic", considered, proposed, considered - proposed,
+                considered == 0 ? "no candidate pair to judge" : proposed + " pair(s) judged duplicates of " + considered + " considered"
+                        + (lastRefusal == null ? "" : " (" + lastRefusal + ")"));
+    }
+
+    /**
+     * {@code PRD-VUL-015}-adjacent: open findings without a classification get one proposed, from the
+     * classifier's model path when a provider is configured and the rules otherwise. Promotion applies it
+     * through the ordinary operation (PRD-AIC-027), which the interface does with the same permission a
+     * person needs to classify by hand.
+     */
+    private Run classificationAssist(Principal principal, Connection connection, int cap) throws SQLException {
+        var classifier = new FindingClassifier(ledgerDataSource());
+        int considered = 0;
+        int proposed = 0;
+        List<Object[]> rows = new ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement("""
+                SELECT f.id, f.title, coalesce(f.description, ''), f.finding_class FROM finding f
+                 WHERE f.state = 'OPEN' AND f.executive_risk_category IS NULL AND f.finding_class <> 'SECRET'
+                   AND f.scope_node_id IN (SELECT descendant_id FROM org_closure WHERE ancestor_id = ANY (?))
+                 ORDER BY f.first_detected_at DESC LIMIT ?
+                """)) {
+            statement.setArray(1, connection.createArrayOf("uuid", principal.scopeNodeIds().toArray()));
+            statement.setInt(2, cap);
+            try (ResultSet r = statement.executeQuery()) {
+                while (r.next()) {
+                    rows.add(new Object[] {r.getObject(1, UUID.class), r.getString(2), r.getString(3), r.getString(4)});
+                }
+            }
+        }
+        for (Object[] row : rows) {
+            considered += 1;
+            injectionSignals.set(Integer.valueOf(injectionSignals.get().intValue()
+                    + ModelNarrator.injectionSignals(Map.of("finding_title", String.valueOf(row[1]), "finding_description", String.valueOf(row[2])))));
+            FindingClassifier.Proposal p = classifier.classify(principal, String.valueOf(row[1]), String.valueOf(row[2]), String.valueOf(row[3]));
+            boolean byModel = p.basis().startsWith("model ");
+            // The basis names the model: "model <identity> (<prompt>): ...". The ledger's provenance is that identity.
+            String modelIdentity = byModel ? p.basis().substring(6, p.basis().indexOf(" (", 6) < 0 ? p.basis().length() : p.basis().indexOf(" (", 6)) : IDENTITY;
+            var draft = new SuggestionLedger.Draft("CLASSIFICATION", "FINDING", (UUID) row[0],
+                    "Classify as " + p.executiveRiskLabel() + " · " + p.owaspCode() + " · " + p.cweId(),
+                    p.basis(),
+                    "Accepting applies the classification to the finding through the ordinary operation and records you as the "
+                            + "person who confirmed it (PRD-AIC-027).",
+                    List.of("finding:" + row[0], "category:" + p.executiveRiskCategory(), "owasp:" + p.owaspCode(), "cwe:" + p.cweId(),
+                            "written-by:" + modelIdentity),
+                    p.confidence());
+            if (ledger.propose(connection, draft, modelIdentity, byModel ? FindingClassifier.PROMPT_VERSION : "classification/rules-1")) {
+                proposed += 1;
+            }
+            // The provider asking us to slow down ends the batch here as in every other arm; the
+            // remaining findings are considered next run rather than each collecting its own 429.
+            if (classifier.lastRefusal().filter(TriageAgent::rateLimited).isPresent()) {
+                break;
+            }
+        }
+        return new Run("classification.assist", considered, proposed, considered - proposed,
+                considered == 0 ? "every open finding in scope is classified" : proposed + " classification(s) proposed for " + considered + " unclassified finding(s)");
+    }
+
+    /** A provider asking us to slow down ends the batch; the remaining items are considered next run. */
+    private static boolean rateLimited(ModelNarrator.Refusal refused) {
+        boolean limited = "PROVIDER_RATE_LIMITED".equals(refused.code()) || "BUDGET_EXHAUSTED".equals(refused.code());
+        if (limited) {
+            THROTTLE.set(new Throttle(refused.detail(), refused.retryAfterSeconds()));
+        }
+        return limited;
+    }
+
+    private static String provenance(int byModel, int proposed, String lastRefusal) {
+        return byModel > 0 ? byModel + " of " + proposed + " written by the configured model"
+                : lastRefusal == null ? "written from the rules" : "written from the rules — the model was not used (" + lastRefusal + ")";
+    }
+
+    private DataSource ledgerDataSource() {
+        return dataSource;
     }
 
     private static Map<String, Object> capability(Connection connection, String code)

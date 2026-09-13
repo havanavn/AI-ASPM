@@ -47,6 +47,9 @@ public final class ObjectStore {
     /** Where SBOM documents live. Created by {@code objectstore-init} in the compose file. */
     public static final String SBOM_BUCKET = "aspm-evidence";
 
+    /** Generated reports and exports (DOC-15 §5.3), a bucket apart from evidence so a policy can differ. */
+    public static final String EXPORT_BUCKET = "aspm-export";
+
     private static final HttpClient CLIENT = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
             .followRedirects(HttpClient.Redirect.NEVER)
@@ -60,6 +63,23 @@ public final class ObjectStore {
     private final String accessKey;
     private final String secretKey;
     private final String region;
+
+    /**
+     * The deployment environment every "read the environment" constructor consults. Bound once by the
+     * application entry point AFTER {@code ASPM_*_REF} references have been resolved in memory
+     * ({@code OPS-DEP-020}), so a store credential mounted as a file reaches the services that build
+     * their own {@code ObjectStore} from "the environment" — {@code System.getenv()} never carries it.
+     */
+    private static volatile Map<String, String> deployment = System.getenv();
+
+    public static void bindDeploymentEnvironment(Map<String, String> environment) {
+        deployment = Map.copyOf(java.util.Objects.requireNonNull(environment));
+    }
+
+    /** The store as the deployment configured it. */
+    public static ObjectStore fromDeployment() {
+        return new ObjectStore(deployment);
+    }
 
     public ObjectStore(Map<String, String> environment) {
         this.endpoint = trimSlash(environment.getOrDefault("ASPM_OBJECTSTORE_ENDPOINT", ""));

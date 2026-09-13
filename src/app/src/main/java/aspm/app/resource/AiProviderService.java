@@ -68,7 +68,7 @@ public final class AiProviderService {
     /** {@code CON-PLT-021}: the record is written in the transaction that makes the change. */
     private final aspm.app.audit.AuditTrail audit =
             new aspm.app.audit.AuditTrail(java.time.Clock.systemUTC());
-    private final CredentialCustody custody = CredentialCustody.from(System.getenv());
+    private final CredentialCustody custody = CredentialCustody.fromDeployment();
 
     public AiProviderService(DataSource dataSource) {
         this.dataSource = Objects.requireNonNull(dataSource, "a data source is required");
@@ -135,10 +135,15 @@ public final class AiProviderService {
         // The SAME egress guard the webhook destinations use. A base URL is an outbound destination
         // with the same exposure: an endpoint resolving to a private address turns the AI feature into
         // a request forger with the platform's network position. One guard, so the two cannot diverge.
-        if (endpoint != null && !WebhookAlerts.permitted(endpoint)) {
-            return new Rejection("ENDPOINT_REFUSED", "baseUrl",
-                    "the endpoint must be an https URL outside private address ranges");
+        if (aspm.app.ai.ModelClient.kind(kind).isEmpty()) {
+            return new Rejection("PROVIDER_UNKNOWN", "providerKind",
+                    "the provider kind is one of " + aspm.app.ai.ModelClient.KINDS.stream().map(aspm.app.ai.ModelClient.Kind::code).toList());
         }
+        kind = kind.toUpperCase(java.util.Locale.ROOT);
+        if (endpoint != null && !aspm.app.ai.ModelEndpoints.permitted(endpoint)) {
+            return new Rejection("ENDPOINT_REFUSED", "baseUrl", aspm.app.ai.ModelEndpoints.refusal(endpoint));
+        }
+
         if (reference == null && (apiKey == null || apiKey.isBlank())) {
             return new Rejection("KEY_REQUIRED", "apiKey",
                     "paste the provider's API key, or give a reference to where it is held");
@@ -263,6 +268,62 @@ public final class AiProviderService {
                 Optional<String> key = custody.open(r.getBytes(5), r.getBytes(6), r.getString(7));
                 return key.map(plain -> new Resolved(r0(r), s(r, 2), s(r, 3), s(r, 4), plain,
                         b(r, 8)));
+            }
+        }
+    }
+
+    /**
+     * A live probe: one tiny completion through the configured adapter, so a wrong key, a wrong base URL
+     * or a server that does not speak the shape fails here, in front of the administrator. The outcome
+     * is recorded on the row (never the reply). Costs a handful of tokens and is counted like any call.
+     */
+    public java.util.Map<String, Object> test(Principal principal, UUID id) throws SQLException {
+        Optional<Resolved> found = resolveAny(principal, id);
+        java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
+        if (found.isEmpty()) {
+            out.put("ok", Boolean.FALSE);
+            out.put("detail", "no such provider, or its key cannot be opened with this deployment's credential key");
+            return out;
+        }
+        Resolved provider = found.get();
+        aspm.app.ai.ModelClient client = aspm.app.ai.ModelClient.forKind(provider.providerKind());
+        long started = System.nanoTime();
+        String status;
+        String detail;
+        try {
+            aspm.app.ai.ModelClient.Completion completion = client.complete(provider.baseUrl(), provider.model(), provider.apiKey(),
+                    // Enough tokens for a model that reasons before it answers; the reply itself is one word.
+                    new aspm.app.ai.ModelClient.Request("Reply with the single word OK.", "Reply with the single word OK.", 256, 0.0, false));
+            long ms = (System.nanoTime() - started) / 1_000_000;
+            status = "OK";
+            detail = "answered in " + ms + " ms" + (completion.modelReported().isBlank() ? "" : " as " + completion.modelReported())
+                    + "; " + (completion.promptTokens() + completion.completionTokens()) + " tokens";
+        } catch (aspm.app.ai.ModelClient.ModelException e) {
+            status = e.code();
+            detail = e.getMessage();
+        }
+        recordTest(principal, id, status, detail);
+        out.put("ok", "OK".equals(status));
+        out.put("status", status);
+        out.put("detail", detail);
+        return out;
+    }
+
+    /** As {@link #resolve} but for an inactive row too: a provider is tested before it is turned on. */
+    private Optional<Resolved> resolveAny(Principal principal, UUID id) throws SQLException {
+        try (Connection connection = open(principal);
+                PreparedStatement statement = connection.prepareStatement("""
+                        SELECT id, provider_kind, base_url, model, api_key_ciphertext, api_key_nonce,
+                               api_key_algorithm, send_record_content
+                          FROM ai_provider WHERE id = ?
+                        """)) {
+            statement.setObject(1, id);
+            try (ResultSet r = statement.executeQuery()) {
+                if (!r.next()) {
+                    return Optional.empty();
+                }
+                Optional<String> key = custody.open(r.getBytes(5), r.getBytes(6), r.getString(7));
+                return key.map(plain -> new Resolved(r0(r), s(r, 2), s(r, 3), s(r, 4), plain, b(r, 8)));
             }
         }
     }

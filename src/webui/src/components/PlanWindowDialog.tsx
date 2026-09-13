@@ -41,6 +41,14 @@ export interface ExistingWindow {
   targetTypeCode: string;
   requestId: string | null;
   requestCode: string | null;
+  teamName?: string | null;
+  assessorName?: string | null;
+}
+
+/** Who a window can be planned for: the active teams and the assignable people (V080). */
+export interface PlanRoster {
+  teams: { id: string; name: string; members: number }[];
+  people: { id: string; name: string; teamId: string | null; teamName: string | null }[];
 }
 
 /** One proposed window, before it is saved. */
@@ -143,8 +151,10 @@ function propose(year: number, perYear: number, days: number): Proposal[] {
  * number should see it on the button rather than in the plan afterwards.
  */
 export function PlanWindowDialog({ targets, existing = [], onSaved, onCancelWindow, trigger,
-                                    disabled }: {
+                                    disabled, roster }: {
   targets: PlanTarget[];
+  /** Teams and people to name as the window's expected owner. Optional: a plan without one is still a plan. */
+  roster?: PlanRoster;
   /**
    * What is already in the plan for these targets.
    *
@@ -169,6 +179,8 @@ export function PlanWindowDialog({ targets, existing = [], onSaved, onCancelWind
   const [proposals, setProposals] = useState<Proposal[]>(
     () => propose(thisYear, impliedPerYear(targets), DEFAULT_DAYS));
   const [note, setNote] = useState("");
+  const [teamId, setTeamId] = useState<string>("");
+  const [assessorId, setAssessorId] = useState<string>("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -209,6 +221,8 @@ export function PlanWindowDialog({ targets, existing = [], onSaved, onCancelWind
           startsOn: p.startsOn,
           endsOn: p.endsOn,
           note: note.trim() || null,
+          teamId: teamId || null,
+          assessorId: assessorId || null,
         })));
       await api.post("/api/ui/assessment-plan/windows", { windows });
       setOpen(false);
@@ -309,6 +323,9 @@ export function PlanWindowDialog({ targets, existing = [], onSaved, onCancelWind
                       </Badge>
                     )}
                     {w.state === "CANCELLED" && <Badge tone="unknown">cancelled</Badge>}
+                    {(w.teamName || w.assessorName) && (
+                      <Badge tone="info">{[w.teamName, w.assessorName].filter(Boolean).join(" · ")}</Badge>
+                    )}
                     {w.note && <span className="truncate text-muted-foreground">{w.note}</span>}
                     <span className="flex-1" />
                     {onCancelWindow && w.state === "PLANNED" && (
@@ -416,6 +433,38 @@ export function PlanWindowDialog({ targets, existing = [], onSaved, onCancelWind
               </tbody>
             </table>
           </div>
+
+          {roster && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="plan-team">Pentest team (optional)</Label>
+                <Select value={teamId || "__none"} onValueChange={(v) => { setTeamId(v === "__none" ? "" : v);
+                  // A person from another team is not carried across: the picker below re-filters.
+                  const person = roster.people.find((p) => p.id === assessorId);
+                  if (v !== "__none" && person && person.teamId !== v) setAssessorId(""); }}>
+                  <SelectTrigger id="plan-team" className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Not yet decided</SelectItem>
+                    {roster.teams.map((t) => <SelectItem key={t.id} value={t.id}>{t.name} <span className="text-muted-foreground">· {t.members}</span></SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="plan-person">Assessor (optional)</Label>
+                <Select value={assessorId || "__none"} onValueChange={(v) => { setAssessorId(v === "__none" ? "" : v);
+                  const person = roster.people.find((p) => p.id === v);
+                  if (person?.teamId && !teamId) setTeamId(person.teamId); }}>
+                  <SelectTrigger id="plan-person" className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Not yet decided</SelectItem>
+                    {roster.people.filter((p) => !teamId || p.teamId === teamId || !p.teamId).map((p) => (
+                      <SelectItem key={p.id} value={p.id}>{p.name}{p.teamName ? <span className="text-muted-foreground"> · {p.teamName}</span> : null}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
 
           <div className="flex flex-col gap-1">
             <Label htmlFor="plan-note">Note (optional)</Label>

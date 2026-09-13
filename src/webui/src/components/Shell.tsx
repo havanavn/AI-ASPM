@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Logo } from "@/components/Logo";
+import { NotificationBell } from "@/components/NotificationBell";
 import { startKeepalive, extendNow } from "@/lib/keepalive";
 import type { Session } from "@/lib/types";
 
@@ -127,6 +128,7 @@ export function Shell({ session }: { session: Session }) {
         <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b px-5">
           <div className="md:hidden text-sm font-semibold">AI ASPM</div>
           <div className="flex-1" />
+          <NotificationBell />
           <Button variant="ghost" size="icon" onClick={() => setDark((d) => !d)}
                   aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}>
             {dark ? <Sun /> : <Moon />}

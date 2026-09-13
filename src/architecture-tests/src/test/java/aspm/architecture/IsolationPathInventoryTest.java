@@ -135,9 +135,25 @@ class IsolationPathInventoryTest {
 
     @Test
     @IsolationPath("I7")
-    @Disabled("Notification is prompt 14. I7: no foreign content in rendered output; content is "
-            + "rendered per recipient at delivery (PRD-NTF-007).")
-    void notification() {}
+    @DisplayName("I7: a notification is rendered for one recipient — the rendered type names them and the renderer takes them first (PRD-NTF-007)")
+    void notification() {
+        // Structural half: the domain's rendered type carries the recipient as its first component, and
+        // the only way to produce one takes the recipient as its first argument — so a rendering shared
+        // between recipients is not constructible. The behavioural half — one row per recipient, the
+        // subject re-checked against that recipient at delivery, SUPPRESSED rather than redacted when
+        // it is no longer visible — is asserted against the platform's schema in
+        // aspm.app.notification.NotificationDeliveryTest.
+        var rendered = aspm.module.notification.domain.RenderedNotification.class;
+        assertTrue(rendered.getRecordComponents().length > 0
+                        && rendered.getRecordComponents()[0].getName().equals("recipientId")
+                        && rendered.getRecordComponents()[0].getType() == java.util.UUID.class,
+                "PRD-NTF-014: a rendered notification names its one recipient first");
+        var renderer = aspm.module.notification.domain.NotificationDispatch.Renderer.class;
+        assertTrue(Arrays.stream(renderer.getMethods())
+                        .filter(m -> m.getName().startsWith("render"))
+                        .allMatch(m -> m.getParameterCount() >= 1 && m.getParameterTypes()[0] == java.util.UUID.class),
+                "every render operation takes the recipient first; there is no render-for-everyone");
+    }
 
     @Test
     @IsolationPath("I10")
@@ -162,9 +178,33 @@ class IsolationPathInventoryTest {
 
     @Test
     @IsolationPath("I13")
-    @Disabled("Secrets integration is ADR-052, wired in prompt 10/16. I13: a reference minted in one "
-            + "tenant does not resolve in another, denied by the provider rather than by the platform.")
-    void secretResolution() {}
+    @DisplayName("I13: a secret reference carries no tenant, and every resolution demands one (SEC-SEC-023)")
+    void secretResolution() {
+        // The contract of ADR-052 whose adapters live in aspm.app.secrets. Two structural facts make a
+        // reference minted in tenant A useless in tenant B: the reference record has no tenant component,
+        // so a reference alone cannot select a tenant; and the only read operation takes the tenant as
+        // its first argument, so an adapter has what it needs to refuse — and each adapter's refusal is
+        // asserted behaviourally in aspm.app.secrets.SecretsTest against a fake provider (no request is
+        // made for a foreign reference). The sealed adapter is refused by the row-level policy itself.
+        var reference = aspm.sharedkernel.secrets.SecretReference.class;
+        assertTrue(Arrays.stream(reference.getRecordComponents())
+                        .noneMatch(c -> c.getType() == java.util.UUID.class),
+                "a SecretReference must not carry a tenant: the tenant is an argument to resolution, "
+                        + "never a property of the reference");
+        var contract = aspm.sharedkernel.secrets.SecretsProvider.class;
+        var resolve = Arrays.stream(contract.getMethods())
+                .filter(m -> m.getName().equals("resolve"))
+                .toList();
+        assertTrue(!resolve.isEmpty() && resolve.stream().allMatch(m -> m.getParameterCount() == 2
+                        && m.getParameterTypes()[0] == java.util.UUID.class
+                        && m.getParameterTypes()[1] == reference),
+                "every resolve on the secrets contract takes (tenant, reference), so no adapter can be "
+                        + "called without the tenant it must check against");
+        assertTrue(Arrays.stream(contract.getMethods()).noneMatch(m -> m.getName().startsWith("list")
+                        || m.getName().startsWith("search") || m.getName().startsWith("find")),
+                "SEC-SEC-024: the contract has no enumeration, so 'non-retrievable after entry' holds "
+                        + "as the absence of a read path (ADR-047, ADR-052)");
+    }
 
     @Test
     @IsolationPath("I14")

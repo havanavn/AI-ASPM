@@ -1033,6 +1033,22 @@ public final class AssessmentService {
                     java.util.Map.of("subject_kind", subjectKind,
                             "subject_id", subjectId.toString(),
                             "body_characters", Integer.valueOf(body.strip().length())));
+            // PRD-NTF-013, same transaction. The comment body is NOT in the notification either — the
+            // in-product row says who commented on what, and the reader opens the thread to read it.
+            if ("ASSESSMENT_REQUEST".equals(subjectKind) && principal != null) {
+                aspm.app.notification.Notifier.request(connection, subjectId).ifPresent(subject -> {
+                    try {
+                        aspm.app.notification.Notifier.emit(connection, principal.tenantId(),
+                                new aspm.app.notification.Notifier.Event("comment.posted", subjectKind, subjectId,
+                                        subject.scopeNodeId(), subject.label(), java.util.Optional.of(principal.principalId()),
+                                        aspm.app.notification.Notifier.displayName(connection, principal.principalId()),
+                                        java.util.Map.of(), java.util.Optional.of("/board/" + subjectId)),
+                                aspm.app.notification.Notifier.requestAudience(connection, subjectId));
+                    } catch (SQLException e) {
+                        throw new IllegalStateException(e);
+                    }
+                });
+            }
             // Read first, then commit: a commit closes the result set the identifier comes from.
             connection.commit();
             return id;

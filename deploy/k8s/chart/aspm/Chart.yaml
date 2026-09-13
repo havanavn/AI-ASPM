@@ -1,0 +1,10 @@
+apiVersion: v2
+name: aspm
+description: >-
+  AI-native Application Security Posture Management — the modular monolith of ADR-003 deployed as the
+  runtime units of DOC-15 §4 on Kubernetes, mesh-native: TLS at the ingress, mTLS between units when a
+  mesh is present, egress deny-by-default per unit generated from the platform's own deployment model.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords: [aspm, security, posture]

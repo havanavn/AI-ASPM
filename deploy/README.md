@@ -8,22 +8,27 @@ does not, and the difference is larger than a deployment guide normally has to a
 ## What exists, and what does not
 
 This repository is a 26-document specification with an implementation of its **domain layer,
-schema, and structural controls**. It is not yet a running platform.
+schema, structural controls, application tier and interface**. It runs; what it has not yet been
+through is an operation by people who did not build it.
 
 | | State |
 |---|---|
-| Operational store schema | **Runs.** 16 migrations, 156 objects, row-level security `FORCE`, partitioning, immutability triggers |
-| Domain models and invariants | **Built and tested.** 1,073 tests, 105 against a real engine |
+| Operational store schema | **Runs.** 77 migrations, row-level security `FORCE` on every tenant table (the unforced global tables are a registered, checked list — V072), partitioning, immutability triggers |
+| Domain models and invariants | **Built and tested.** Every module's invariants, plus 333 application-tier tests against a real engine |
 | Structural enforcement | **Runs.** Module boundaries, authorization static analysis, honesty assertions — all compile- or test-time |
-| Deployment topology | **Modelled, not provisioned.** `src/deployment` fails the build on a violation; it does not create infrastructure |
+| Deployment topology | **Modelled, and the Kubernetes chart is generated from the model.** `src/deployment` fails the build on a violation and writes `deploy/k8s/chart/aspm/files/model.yaml`, from which every Deployment, NetworkPolicy and Istio `Sidecar` is rendered (ADR-071). Compose is the laptop; the chart is the estate |
 | Application tier | **Runs.** Entrypoint, JDK HTTP server (ADR-057), composition root, readiness and liveness |
-| API and interface operations | **75 registered**, every one carrying an annotation class and — unless class G — a permission the dispatcher enforces. DOC-05 §12–§25 specify well over a hundred API operations alone |
-| Authentication | **Runs, narrowed.** Local credential plus TOTP with forced enrolment (ADR-059). ADR-004's federated half and sender-constrained service credentials are **not** built |
+| API and interface operations | **257 registered**, every one carrying an annotation class and — unless class G — a permission the dispatcher enforces |
+| Authentication | **Runs.** OIDC authorization-code with PKCE against any provider — Okta, Microsoft Entra ID, Keycloak, Google, or a generic issuer — with JIT provisioning and group-to-role mapping reconciled at sign-in (ADR-068); local credential plus TOTP alongside or as break-glass (ADR-059); sender-constrained signed requests for services |
+| Secrets | **Runs, as options.** Platform-sealed store by default; HashiCorp Vault / OpenBao, Azure Key Vault, AWS Secrets Manager or Google Secret Manager by configuration (ADR-067). Every credential a tenant enters leaves as a reference |
+| Notifications | **Runs.** Email over any SMTP relay, Slack (webhook or bot), Microsoft Teams, signed webhooks — routed per category per person, verified before first content, drained by a worker (ADR-069) |
+| Outbound connectors | **Runs.** Jira Cloud, Jira Data Center, GitLab, ServiceNow, signed webhook — one-way references from findings, observed for divergence, never applied back (ADR-070) |
+| Reports | **Runs.** Scheduled, rendered per recipient into the export bucket; audit evidence assembled on demand and audited (DOC-12 §11–§12) |
 | Authorization | **Runs.** Permission enforced at the dispatcher for every route; scope resolved per object in the handler |
-| Interface | **Runs.** Server-rendered, no build step (ADR-058): overview, findings, requests with transitions, dependencies, workload, user and role administration, self-service account |
+| Interface | **Runs.** Server-rendered shell (ADR-058) with a committed React bundle for the application pages: overview, findings, requests with transitions, dependencies, workload, planning, access, identity providers, notification channels, connectors, reports, self-service account |
 
 So `docker compose up` gives you a correct, inspectable data tier, an application tier that answers
-requests, and an interface you sign in to.
+requests, workers that deliver and observe, and an interface you sign in to. For a cluster, `deploy/k8s`.
 
 **Why it is stated this way.** The platform's first product principle is that absence of evidence
 is not evidence of absence, and a deployment guide that lists services without saying which of
@@ -133,11 +138,17 @@ Observed behaviour, each of it enforced rather than described:
 
 `migrate` prints its post-conditions rather than only "done":
 
-- how many tables carry forced row-level security, out of how many (370 of 373)
-- the **three** tables deliberately outside it, each with its reason, printed rather than filtered
-  away — `tenant`, `tenant_id_reservation`, `hash_partition_basis`
-- **any other table without a forced policy** — this list must be empty, and a non-empty one is a
-  cross-tenant read path, not a style issue
+- how many tables carry forced row-level security, out of how many (417 of 425 at V072)
+- the tables deliberately outside it, each with the reason it was registered — read from
+  `tenant_isolation_exemption` (V072), which the migration creating each global table writes. Eight
+  today: the registry itself, `tenant`, `tenant_id_reservation`, `hash_partition_basis`, and the four
+  product-fixed reference tables `breached_password`, `permission_catalogue`, `cwe`,
+  `owasp_top10_2025`. This list used to be typed into this script and into `conformance.sql` by hand,
+  named three tables, and on 2026-09-11 the conformance job failed on the four reference tables that
+  had been added since — a correct schema, a stale assertion
+- **any other table without a forced policy, or a registered table that no longer exists** — this
+  list must be empty, and a non-empty one is a cross-tenant read path or a rotted exemption, not a
+  style issue
 - range partition runway in months per table, with an alert flag below three (`OPS-DEP-011`)
 - hash partition counts with confirmation that a sizing basis is recorded (`OPS-DEP-012`)
 
@@ -211,7 +222,9 @@ raising rather than warning:
    engine's implementation with a weaker one, permanently and invisibly. **This is the one claim the
    build cannot make**, since it runs against an embedded 17.5.
 2. `tenant_isolation_gaps()` is empty — `OPS-DEP-031` requires this after every migration.
-3. Forced row-level security on every table but the three documented exceptions.
+3. Forced row-level security on every table but the exemptions registered in
+   `tenant_isolation_exemption`, each with a reason (V072). A global table without a registered
+   reason fails; so does a registry row naming a table that no longer exists.
 4. Partition runway: zero runway fails, below the lead time warns.
 5. Hash partition counts agree with the recorded sizing basis.
 6. No BYPASSRLS role can log in directly, and `offboarding_executor` cannot log in at all.

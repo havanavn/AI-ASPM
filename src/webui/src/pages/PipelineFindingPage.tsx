@@ -4,6 +4,7 @@ import { ArrowLeft, ExternalLink } from "lucide-react";
 import { api } from "@/lib/api";
 import { severityTone } from "@/components/tone";
 import { FindingLifecycle } from "@/components/FindingLifecycle";
+import { FindingReferences } from "@/components/FindingReferences";
 import { Prose } from "@/components/Prose";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -99,6 +100,7 @@ export function PipelineFindingPage() {
       {/* The status control, above the prose. Somebody opening a finding is deciding what to do with
           it; the write-up is what they read to decide. */}
       <FindingLifecycle findingId={id} onMoved={load} />
+      <FindingReferences findingId={id} />
 
       <div className="grid gap-5 lg:grid-cols-3">
         <Card className="lg:col-span-2">

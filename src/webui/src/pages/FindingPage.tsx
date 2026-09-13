@@ -5,6 +5,8 @@ import { api } from "@/lib/api";
 import { severityTone } from "@/components/tone";
 import { Comments, type CommentRow } from "@/components/Comments";
 import { FindingLifecycle } from "@/components/FindingLifecycle";
+import { FindingReferences } from "@/components/FindingReferences";
+import { DraftButton } from "@/components/DraftButton";
 import { TaxonomyPicker, TAXONOMY_HELP } from "@/components/TaxonomyPicker";
 import { Prose } from "@/components/Prose";
 import { RichText } from "@/components/RichTextLazy";
@@ -154,6 +156,7 @@ export function FindingPage() {
       {/* Above the write-up. Somebody opening a finding is deciding what to do with it, and the
           state plus the moves available is that decision; the prose is what they read to make it. */}
       <FindingLifecycle findingId={findingId} onMoved={load} />
+      <FindingReferences findingId={findingId} />
 
       {editing && draft ? (
         <Card>
@@ -225,7 +228,9 @@ export function FindingPage() {
             </div>
 
             <div className="flex flex-col gap-1">
-              <Label>Description</Label>
+              <div className="flex items-center justify-between"><Label>Description</Label>
+                <DraftButton kind="FINDING_WRITEUP" title={draft.title} notes={draft.description}
+                             onDraft={(text) => setDraft({ ...draft, description: text })} /></div>
               <RichText value={draft.description} onChange={(v) => setDraft({ ...draft, description: v })}
                         uploadTo={uploadTo} finding={findingId} minHeight="12rem" />
             </div>

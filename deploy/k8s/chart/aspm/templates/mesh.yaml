@@ -1,0 +1,110 @@
+{{- /*
+OPTION: the mesh. Under Istio: mTLS STRICT for every unit, and per-unit Sidecars with REGISTRY_ONLY
+outbound so a sidecar refuses any destination that is not a ServiceEntry — the mesh-layer twin of the
+NetworkPolicy. One ServiceEntry per host the operator listed for a destination class the model grants
+the unit. Under Linkerd: injection is by annotation (see _helpers.tpl); a Server per unit declares the
+port so authorization policy can be attached by the operator.
+*/ -}}
+{{- $model := include "aspm.model" . | fromJson -}}
+{{- if eq .Values.mesh.kind "istio" }}
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: {{ include "aspm.fullname" . }}-strict
+  labels:
+    {{- include "aspm.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  mtls:
+    mode: STRICT
+{{- range $name, $unit := $model.units }}
+---
+apiVersion: networking.istio.io/v1
+kind: Sidecar
+metadata:
+  name: {{ include "aspm.fullname" $ }}-{{ $name }}
+  labels:
+    {{- include "aspm.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  workloadSelector:
+    labels:
+      {{- include "aspm.unitLabels" (dict "root" $ "unit" $name) | nindent 6 }}
+  outboundTrafficPolicy:
+    mode: REGISTRY_ONLY
+  egress:
+    - hosts:
+        - "./*"
+        {{- range $class := $unit.egress }}
+        {{- $dest := index $.Values.egress.destinations $class }}
+        {{- if and $dest $dest.hosts }}
+        {{- range $host := $dest.hosts }}
+        - "./{{ $host }}"
+        {{- end }}
+        {{- end }}
+        {{- end }}
+{{- end }}
+{{- range $class, $dest := .Values.egress.destinations }}
+{{- if $dest.hosts }}
+---
+apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: {{ include "aspm.fullname" $ }}-{{ $class | lower | replace "_" "-" }}
+  labels:
+    {{- include "aspm.labels" $ | nindent 4 }}
+    aspm.io/destination-class: {{ $class }}
+spec:
+  hosts:
+    {{- range $host := $dest.hosts }}
+    - {{ $host | quote }}
+    {{- end }}
+  location: MESH_EXTERNAL
+  resolution: DNS
+  ports:
+    {{- range $port := $dest.ports }}
+    - number: {{ $port }}
+      name: tls-{{ $port }}
+      protocol: TLS
+    {{- end }}
+{{- end }}
+{{- end }}
+---
+# Only the gateway may call the application tier; nothing may call the worker.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: {{ include "aspm.fullname" . }}-app-from-gateway
+  labels:
+    {{- include "aspm.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "aspm.unitLabels" (dict "root" . "unit" "app") | nindent 6 }}
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            namespaces:
+              - {{ .Values.ingress.gatewayApi.gatewayNamespace | default .Release.Namespace | quote }}
+              - istio-system
+{{- else if eq .Values.mesh.kind "linkerd" }}
+{{- range $name, $unit := $model.units }}
+---
+apiVersion: policy.linkerd.io/v1beta3
+kind: Server
+metadata:
+  name: {{ include "aspm.fullname" $ }}-{{ $name }}
+  labels:
+    {{- include "aspm.labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "aspm.unitLabels" (dict "root" $ "unit" $name) | nindent 6 }}
+  port: http
+  proxyProtocol: HTTP/1
+{{- end }}
+{{- end }}

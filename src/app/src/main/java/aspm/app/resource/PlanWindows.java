@@ -101,12 +101,17 @@ public final class PlanWindows {
     /** A window as the interface reads it. Dates as ISO strings — the wire format is a date, not an instant. */
     public record Window(String id, String targetAssetId, String targetName, String targetTypeCode,
             String startsOn, String endsOn, String assessmentTypeId, String assessmentTypeName,
-            String triggerId, String note, String state, String requestId, String requestCode) {
+            String triggerId, String note, String state, String requestId, String requestCode,
+            String teamId, String teamName, String assessorId, String assessorName) {
     }
 
     /** A window as a caller asks for it. */
     public record Draft(UUID targetAssetId, LocalDate startsOn, LocalDate endsOn,
-            UUID assessmentTypeId, UUID triggerId, String note) {
+            UUID assessmentTypeId, UUID triggerId, String note, UUID teamId, UUID assessorId) {
+        /** The V070 shape, for callers that plan without naming who runs it. */
+        public Draft(UUID targetAssetId, LocalDate startsOn, LocalDate endsOn, UUID assessmentTypeId, UUID triggerId, String note) {
+            this(targetAssetId, startsOn, endsOn, assessmentTypeId, triggerId, note, null, null);
+        }
     }
 
     /** What a bulk create did, so the caller can be told rather than guess. */
@@ -143,12 +148,20 @@ public final class PlanWindows {
                                to_char(w.starts_on, 'YYYY-MM-DD'), to_char(w.ends_on, 'YYYY-MM-DD'),
                                w.assessment_type_id::text, ty.label_i18n ->> 'en',
                                w.trigger_id::text, w.note, w.state,
-                               w.request_id::text, r.request_code
+                               w.request_id::text, r.request_code,
+                               -- Who is expected to run it (V080). Resolved by name here, not by a
+                               -- foreign key (ADR-030): a retired team or a deactivated person still
+                               -- shows on the plan they were part of.
+                               w.team_id::text, coalesce(tm.name, CASE WHEN w.team_id IS NULL THEN NULL ELSE '(team no longer exists)' END),
+                               w.assessor_principal_id::text,
+                               coalesce(pp.display_name, pp.username, CASE WHEN w.assessor_principal_id IS NULL THEN NULL ELSE '(person no longer exists)' END)
                           FROM assessment_plan_window w
                           JOIN asset a ON a.id = w.target_asset_id
                           JOIN asset_type t ON t.id = a.type_id
                           LEFT JOIN assessment_type ty ON ty.id = w.assessment_type_id
                           LEFT JOIN assessment_request r ON r.id = w.request_id
+                          LEFT JOIN assessor_team tm ON tm.id = w.team_id
+                          LEFT JOIN principal pp ON pp.id = w.assessor_principal_id
                          WHERE %s
                            AND a.owning_node_id IN (SELECT descendant_id FROM org_closure
                                                      WHERE ancestor_id = ANY (?))
@@ -160,7 +173,8 @@ public final class PlanWindows {
                     windows.add(new Window(r.getString(1), r.getString(2), r.getString(3),
                             r.getString(4), r.getString(5), r.getString(6), r.getString(7),
                             r.getString(8), r.getString(9), r.getString(10), r.getString(11),
-                            r.getString(12), r.getString(13)));
+                            r.getString(12), r.getString(13), r.getString(14), r.getString(15),
+                            r.getString(16), r.getString(17)));
                 }
             }
         }
@@ -228,8 +242,8 @@ public final class PlanWindows {
             try (PreparedStatement statement = connection.prepareStatement("""
                     INSERT INTO assessment_plan_window
                         (tenant_id, target_asset_id, starts_on, ends_on, assessment_type_id,
-                         trigger_id, note, created_by, updated_by)
-                    VALUES (current_tenant_id(), ?, ?, ?, ?, ?, ?, ?, ?)
+                         trigger_id, note, team_id, assessor_principal_id, created_by, updated_by)
+                    VALUES (current_tenant_id(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     RETURNING id
                     """)) {
                 for (Draft draft : drafts) {
@@ -239,8 +253,10 @@ public final class PlanWindows {
                     statement.setObject(4, draft.assessmentTypeId());
                     statement.setObject(5, draft.triggerId());
                     statement.setString(6, blankToNull(draft.note()));
-                    statement.setObject(7, principal.principalId());
-                    statement.setObject(8, principal.principalId());
+                    statement.setObject(7, draft.teamId());
+                    statement.setObject(8, draft.assessorId());
+                    statement.setObject(9, principal.principalId());
+                    statement.setObject(10, principal.principalId());
                     UUID created;
                     try (ResultSet r = statement.executeQuery()) {
                         if (!r.next()) {
@@ -254,7 +270,9 @@ public final class PlanWindows {
                             aspm.app.audit.AuditScopes.ofAsset(connection, draft.targetAssetId()),
                             java.util.Map.of("target_asset_id", draft.targetAssetId().toString(),
                                     "starts_on", draft.startsOn().toString(),
-                                    "ends_on", draft.endsOn().toString()));
+                                    "ends_on", draft.endsOn().toString(),
+                                    "team_id", draft.teamId() == null ? "" : draft.teamId().toString(),
+                                    "assessor_principal_id", draft.assessorId() == null ? "" : draft.assessorId().toString()));
                 }
             }
             LocalDate earliest = drafts.stream().map(Draft::startsOn).min(LocalDate::compareTo)
@@ -285,6 +303,16 @@ public final class PlanWindows {
      */
     public Optional<UUID> update(Principal principal, UUID id, LocalDate startsOn, LocalDate endsOn,
             UUID assessmentTypeId, UUID triggerId, String note) throws SQLException {
+        return update(principal, id, startsOn, endsOn, assessmentTypeId, triggerId, note, null, null, false);
+    }
+
+    /**
+     * @param ownerGiven whether {@code teamId}/{@code assessorId} are to be written at all — a caller moving
+     *     dates must not clear who runs the window by omission
+     */
+    public Optional<UUID> update(Principal principal, UUID id, LocalDate startsOn, LocalDate endsOn,
+            UUID assessmentTypeId, UUID triggerId, String note, UUID teamId, UUID assessorId, boolean ownerGiven)
+            throws SQLException {
         Objects.requireNonNull(id, "a window identifier is required");
         if (startsOn == null || endsOn == null) {
             throw new IllegalArgumentException("a window needs both a start and an end date");
@@ -302,6 +330,8 @@ public final class PlanWindows {
                         UPDATE assessment_plan_window w
                            SET starts_on = ?, ends_on = ?, assessment_type_id = ?, trigger_id = ?,
                                note = ?, updated_at = now(), updated_by = ?,
+                               team_id = CASE WHEN ? THEN ? ELSE w.team_id END,
+                               assessor_principal_id = CASE WHEN ? THEN ? ELSE w.assessor_principal_id END,
                                row_version = w.row_version + 1
                          WHERE w.id = ?
                            AND EXISTS (SELECT 1 FROM asset a
@@ -316,8 +346,12 @@ public final class PlanWindows {
             statement.setObject(4, triggerId);
             statement.setString(5, blankToNull(note));
             statement.setObject(6, principal.principalId());
-            statement.setObject(7, id);
-            statement.setArray(8, connection.createArrayOf("uuid", scope.toArray(new UUID[0])));
+            statement.setBoolean(7, ownerGiven);
+            statement.setObject(8, teamId);
+            statement.setBoolean(9, ownerGiven);
+            statement.setObject(10, assessorId);
+            statement.setObject(11, id);
+            statement.setArray(12, connection.createArrayOf("uuid", scope.toArray(new UUID[0])));
             if (statement.executeUpdate() == 0) {
                 // Nothing matched, so there is nothing to record — but the statement still ran, and
                 // TenantConnections counts a ran-and-matched-nothing UPDATE as a write. Closing
@@ -329,7 +363,9 @@ public final class PlanWindows {
             audit.domainChange(connection, principal, "assessment_plan_window",
                     aspm.kernel.audit.contract.DomainChangeKind.UPDATED, id, null,
                     java.util.Map.of("starts_on", startsOn.toString(),
-                            "ends_on", endsOn.toString()));
+                            "ends_on", endsOn.toString(),
+                            "team_id", !ownerGiven ? "(unchanged)" : teamId == null ? "" : teamId.toString(),
+                            "assessor_principal_id", !ownerGiven ? "(unchanged)" : assessorId == null ? "" : assessorId.toString()));
             connection.commit();
             return Optional.of(id);
         }

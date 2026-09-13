@@ -1,11 +1,21 @@
-# AI-ASPM — local deployment of the data tier.
+# AI-ASPM — local deployment: the data tier and the application tier on one machine.
 #
-# WHAT THIS STANDS UP: the operational store (ADR-049), the shared cache (ADR-055), and object
-# storage (ADR-056), plus a one-shot job that applies V001 to V013.
+# WHAT THIS STANDS UP: the operational store (ADR-049), the shared cache (ADR-055), object storage
+# (ADR-056) with the evidence and export buckets, a one-shot job that applies every migration under
+# ../src in version order, the application (`app`, ASPM_ROLE=all: HTTP tier plus the notification,
+# connector and report workers in one process), and the scanner ticker. The Kubernetes deployment of
+# the same artifact, one Deployment per runtime unit behind a mesh, is deploy/k8s (ADR-071).
 #
-# WHAT IT DOES NOT STAND UP: an application tier. There is no HTTP service in this repository yet
-# — no entrypoint, no server, and OperationRegistry holds zero operations. See deploy/README.md,
-# which states that plainly rather than leaving you to discover it from a container that exits.
+# WHAT IT DOES NOT STAND UP: managed backups, restore rehearsal, or a second replica of anything.
+# It is a laptop; see deploy/README.md for what that means.
+#
+# OPTIONS ARE ENVIRONMENT (ADR-027 applied to deployment): identity providers, notification
+# channels and connectors are configured in the interface and stored by reference in the secrets
+# store (ADR-052, ASPM_SECRETS_PROVIDERS). Deployment-level switches worth knowing here:
+#   ASPM_PUBLIC_BASE_URL      enables OIDC sign-in (Okta, Entra, Keycloak, Google, generic); https outside development
+#   ASPM_SMTP_RELAYS          operator-vouched mail relays that may sit on a private address
+#   ASPM_CONNECTOR_KINDS      the connector kinds this deployment allows (air-gapped: list them)
+#   ASPM_ROLE                 all | app | worker — which DOC-15 §4 runtime unit this process plays
 #
 # ---------------------------------------------------------------------------------------------
 # OPS-DEP-009 IS ENFORCED BY THIS FILE, not merely described by it.
@@ -169,6 +179,10 @@ services:
       # The development header resolver is now OFF. The session resolver is the default, so the login
       # flow is the only way in. Set ASPM_DEV_AUTH=true to restore header identity for API testing.
       ASPM_DEV_AUTH: "${ASPM_DEV_AUTH:-false}"
+      # Self-hosted model endpoints the operator vouches for (ADR-075, PRD-AIC-025): base URLs a tenant
+      # may configure as an AI provider although they sit on a private network or speak http inside
+      # the estate. Empty means only public https providers are accepted.
+      ASPM_MODEL_ENDPOINTS: ${ASPM_MODEL_ENDPOINTS:-}
     ports:
       # BOUND TO THE LOOPBACK INTERFACE, not to every address. `- "8080:8080"` binds 0.0.0.0, which
       # publishes this tier to every network the host is on — measured on this host: the app, the

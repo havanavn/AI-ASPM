@@ -87,7 +87,7 @@ public final class FindingImport {
 
     private final DataSource dataSource;
     private final SbomIngestion sboms;
-    private final ObjectStore objects = new ObjectStore(System.getenv());
+    private final ObjectStore objects = ObjectStore.fromDeployment();
 
     /**
      * An import is the platform's highest-volume write and the one whose provenance matters most: every

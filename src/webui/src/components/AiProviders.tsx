@@ -7,6 +7,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+/** The provider families the platform speaks (ADR-075). Mirrors ModelClient.KINDS; the server validates. */
+const KINDS: { code: string; label: string; defaultBaseUrl: string; hint: string }[] = [
+  { code: "OPENAI_COMPATIBLE", label: "OpenAI-compatible / self-hosted (vLLM, Ollama, LiteLLM, llama.cpp, TGI, a gateway)", defaultBaseUrl: "",
+    hint: "The server's /v1 base URL. A private address must be vouched for by the deployment (ASPM_MODEL_ENDPOINTS)." },
+  { code: "OPENAI", label: "OpenAI", defaultBaseUrl: "https://api.openai.com/v1", hint: "Leave the endpoint empty for api.openai.com." },
+  { code: "AZURE_OPENAI", label: "Azure OpenAI", defaultBaseUrl: "",
+    hint: "https://<resource>.openai.azure.com/openai/deployments/<deployment>?api-version=2024-10-21 — the model is the deployment name." },
+  { code: "ANTHROPIC", label: "Anthropic", defaultBaseUrl: "https://api.anthropic.com", hint: "Leave the endpoint empty for api.anthropic.com." },
+];
 
 interface Row {
   id: string; label: string; providerKind: string; baseUrl: string | null; model: string;
@@ -52,7 +63,8 @@ export function AiProviders() {
   const [error, setError] = useState<{ message: string; field?: string } | null>(null);
 
   const [label, setLabel] = useState("");
-  const [kind, setKind] = useState("");
+  const [kind, setKind] = useState("OPENAI_COMPATIBLE");
+  const [probe, setProbe] = useState<{ id: string; ok: boolean; detail: string } | null>(null);
   const [model, setModel] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -86,6 +98,20 @@ export function AiProviders() {
       setError(e instanceof ApiError
         ? { message: e.message, field: e.field ?? undefined }
         : { message: "The provider could not be saved." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function test(row: Row) {
+    setBusy(true);
+    setProbe(null);
+    try {
+      const r = await api.post<{ ok: boolean; status: string; detail: string }>(`/api/ui/ai-providers/${row.id}/test`, {});
+      setProbe({ id: row.id, ok: r.ok, detail: `${r.status}: ${r.detail}` });
+      load();
+    } catch (e) {
+      setError({ message: e instanceof ApiError ? e.message : "The probe could not run." });
     } finally {
       setBusy(false);
     }
@@ -182,12 +208,22 @@ export function AiProviders() {
                   </TableCell>
                   <TableCell>
                     {row.active ? <Badge tone="ok">active</Badge> : <Badge tone="neutral">off</Badge>}
+                    {row.lastTestStatus && (
+                      <div className={`mt-1 text-[10px] ${row.lastTestStatus === "OK" ? "text-tone-ok" : "text-destructive"}`}
+                           title={row.lastTestDetail ?? ""}>
+                        probe {row.lastTestStatus}{row.lastTestedAt ? ` · ${row.lastTestedAt.replace("T", " ").slice(0, 16)}` : ""}
+                      </div>
+                    )}
+                    {probe?.id === row.id && <div className={`mt-1 text-[10px] ${probe.ok ? "text-tone-ok" : "text-destructive"}`}>{probe.detail}</div>}
                   </TableCell>
                   {mayManage && (
                     <TableCell>
-                      <Button size="sm" variant="ghost" disabled={busy} onClick={() => void toggle(row)}>
-                        {row.active ? "Turn off" : "Turn on"}
-                      </Button>
+                      <div className="flex flex-col gap-1">
+                        <Button size="sm" variant="outline" disabled={busy} onClick={() => void test(row)}>Test</Button>
+                        <Button size="sm" variant="ghost" disabled={busy} onClick={() => void toggle(row)}>
+                          {row.active ? "Turn off" : "Turn on"}
+                        </Button>
+                      </div>
                     </TableCell>
                   )}
                 </TableRow>
@@ -220,16 +256,19 @@ export function AiProviders() {
                        onChange={(e) => setLabel(e.target.value)} />
               </div>
               <div className="flex flex-col gap-1">
-                <Label htmlFor="ai-kind">Provider</Label>
-                {/* Free text, not a dropdown of today's vendors. ADR-027 forbids a fixed enumeration
-                    for a tenant-configurable surface, and OQ-027's assumption is explicit that a
-                    tenant may point at its own inference server — the case a vendor list excludes. */}
-                <Input id="ai-kind" value={kind} placeholder="anthropic · openai · self-hosted"
-                       onChange={(e) => setKind(e.target.value)} />
+                <Label htmlFor="ai-kind">Provider family</Label>
+                {/* A family is a wire protocol the platform speaks, not a vendor: OpenAI-compatible
+                    covers every self-hosted server OQ-027 names. ADR-027 is about tenant vocabulary;
+                    the request shape a server understands is a product property. */}
+                <Select value={kind} onValueChange={(v) => { setKind(v); const k = KINDS.find((x) => x.code === v); if (k && !baseUrl) setBaseUrl(k.defaultBaseUrl); }}>
+                  <SelectTrigger id="ai-kind"><SelectValue /></SelectTrigger>
+                  <SelectContent>{KINDS.map((k) => <SelectItem key={k.code} value={k.code}>{k.label}</SelectItem>)}</SelectContent>
+                </Select>
+                <span className="text-[10px] text-muted-foreground">{KINDS.find((k) => k.code === kind)?.hint}</span>
               </div>
               <div className="flex flex-col gap-1">
                 <Label htmlFor="ai-model">Model</Label>
-                <Input id="ai-model" value={model} placeholder="claude-sonnet-5"
+                <Input id="ai-model" value={model} placeholder={kind === "ANTHROPIC" ? "claude-sonnet-5" : kind === "OPENAI" ? "gpt-4o-mini" : "the model name the server serves"}
                        onChange={(e) => setModel(e.target.value)} />
               </div>
               <div className="flex flex-col gap-1">
@@ -237,8 +276,8 @@ export function AiProviders() {
                 <Input id="ai-url" value={baseUrl} placeholder="https://your-inference-host/v1"
                        onChange={(e) => setBaseUrl(e.target.value)} />
                 <span className="text-[10px] text-muted-foreground">
-                  Leave empty for the provider's own endpoint. Must be https and outside private
-                  address ranges — the same guard the alert destinations use.
+                  Public https, or a self-hosted endpoint this deployment vouches for. The guard is the
+                  same one the alert destinations use, with the operator's list as the only exception.
                 </span>
               </div>
             </div>

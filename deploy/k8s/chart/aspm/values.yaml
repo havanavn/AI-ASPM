@@ -1,0 +1,238 @@
+# ---------------------------------------------------------------------------------------------------
+# AI ASPM Helm chart — operator-facing options.
+#
+# Everything about WHICH units exist, what they may reach and how they are probed comes from
+# files/model.yaml, which is generated from the platform's deployment model (KubernetesManifests) and
+# must not be edited by hand. This file holds what differs per deployment: images, hosts, sizes, and
+# the OPTIONS — mesh, ingress, secrets provider, data tier.
+#
+# Read deploy/k8s/README.md first. It says what this chart does not do yet.
+# ---------------------------------------------------------------------------------------------------
+
+image:
+  # OPS-DEP-028: pin by DIGEST in production. A tag can be reassigned to different content.
+  repository: ghcr.io/example/aspm-app
+  tag: ""            # used only when digest is empty (development)
+  digest: ""         # sha256:… — the production setting
+  pullPolicy: IfNotPresent
+migrateImage:
+  repository: ghcr.io/example/aspm-migrate
+  tag: ""
+  digest: ""
+postgresClientImage:
+  # For the conformance job (psql only). Pin by digest in production.
+  repository: postgres
+  tag: "18-alpine"
+  digest: ""
+
+# The deployment's single tenant (the application tier serves one tenant per deployment today).
+tenantId: "11111111-1111-1111-1111-111111111111"
+# ASPM_ENVIRONMENT: anything but "development" marks session cookies Secure and refuses the dev resolver.
+environment: production
+# The public origin the browser reaches. Federated sign-in builds its redirect URI from it; it MUST be
+# https and MUST match the ingress host below.
+publicBaseUrl: "https://aspm.example.com"
+
+replicas:
+  app: 2
+  worker: 2
+
+autoscaling:
+  app:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+
+# ---------------------------------------------------------------------------------------------------
+# OPTION: ingress. TLS terminates here (ADR-057); the ingress makes no authorization decision
+# (OPS-DEP-017). Choose ONE.
+# ---------------------------------------------------------------------------------------------------
+ingress:
+  kind: gatewayApi      # gatewayApi | nginx | none
+  host: aspm.example.com
+  gatewayApi:
+    gatewayName: aspm-gateway
+    gatewayNamespace: ""            # empty = same namespace
+  nginx:
+    className: nginx
+    tlsSecretName: aspm-tls
+    annotations: {}
+
+# ---------------------------------------------------------------------------------------------------
+# OPTION: service mesh. none | istio | linkerd.
+#   istio   — PeerAuthentication STRICT, a Sidecar per unit with REGISTRY_ONLY outbound and one
+#             ServiceEntry per external destination the model allows the unit to reach.
+#   linkerd — injection annotations; policy through Server/ServerAuthorization is left to the
+#             operator's mesh policy (the NetworkPolicy below still applies).
+#   none    — NetworkPolicy only.
+# ---------------------------------------------------------------------------------------------------
+mesh:
+  kind: none
+  istio:
+    revision: ""                    # sidecar.istio.io/inject via label istio.io/rev when set
+  linkerd:
+    inject: true
+
+# ---------------------------------------------------------------------------------------------------
+# OPTION: secrets provider (ADR-052). The application reads the same ASPM_SECRETS_* variables the
+# compose deployment does. Mesh-native default: `file` — the platform's secrets are projected into the
+# pod at /var/run/secrets/aspm by a Kubernetes Secret, a CSI SecretProviderClass, or External Secrets.
+#   file   — mount `secrets.file.existingSecret` (keys become files) — the platform-provided default
+#            store (sealed rows) is then also enabled, with its key read from a mounted file.
+#   vault  — HashiCorp Vault / OpenBao KV v2 with Kubernetes auth (no static token anywhere).
+#   azkv   — Azure Key Vault with workload identity.
+#   awssm  — AWS Secrets Manager with IRSA / Pod Identity.
+#   gcpsm  — Google Secret Manager with GKE workload identity.
+# ---------------------------------------------------------------------------------------------------
+secrets:
+  provider: file
+  # Deployment secrets the platform needs regardless of provider: database password for app_runtime,
+  # object store credential, the sealing key (ASPM_CREDENTIAL_KEY_REF=file:credential-key), the
+  # bootstrap password. Provided as an existing Secret whose keys are file names under the mount.
+  file:
+    existingSecret: aspm-deployment-secrets
+    mountPath: /var/run/secrets/aspm
+  # CSI secrets-store driver (secrets-store.csi.x-k8s.io) — an alternative way to fill the mount.
+  csi:
+    enabled: false
+    providerClassName: aspm-secrets
+  vault:
+    address: "https://vault.example.com"
+    mount: aspm
+    namespace: ""
+    kubernetesRole: aspm
+    kubernetesAuthPath: kubernetes
+  azkv:
+    vaultName: ""
+    tenantId: ""
+    clientId: ""
+  awssm:
+    region: ""
+    roleArn: ""
+  gcpsm:
+    project: ""
+
+# ---------------------------------------------------------------------------------------------------
+# Data tier. OPTION: external (managed) PostgreSQL 18 — the production shape — or the in-cluster
+# development instance (NOT for real data: no backups, no HA).
+# ---------------------------------------------------------------------------------------------------
+postgres:
+  host: postgres.aspm-data.svc.cluster.local
+  port: 5432
+  database: aspm
+  # Login roles per DOC-15 §5.1: the app tier holds ONLY aspm_app. The migrate job holds aspm_migrate.
+  appUser: aspm_app
+  migrateUser: aspm_migrate
+  verifyUser: aspm_verify
+  # Secret keys (files under the mount) that hold each password.
+  appPasswordKey: db-app-password
+  migratePasswordKey: db-migrate-password
+  verifyPasswordKey: db-verify-password
+  # CIDR/port the units may reach for the store, for the NetworkPolicy.
+  cidr: 10.0.0.0/8
+  developmentInstance:
+    enabled: false
+
+objectStore:
+  # OPS-DEP-016: a DISTINCT ORIGIN from the API, on its own registrable domain.
+  endpoint: "https://objects.aspm-data.example.com"
+  region: us-east-1
+  userKey: objectstore-user
+  passwordKey: objectstore-password
+  cidr: 10.0.0.0/8
+
+valkey:
+  host: valkey.aspm-data.svc.cluster.local
+  cidr: 10.0.0.0/8
+
+# ---------------------------------------------------------------------------------------------------
+# Egress destinations per destination CLASS of the model. The model says WHICH classes a unit may
+# reach; the operator says WHERE each class lives, as CIDR/port pairs for the NetworkPolicy and as
+# hosts for Istio ServiceEntries. Empty means "this class is not reachable in this deployment", which
+# is how an air-gapped topology (DOC-15 §14) is expressed: leave IDENTITY_PROVIDER, MODEL_PROVIDER and
+# INTELLIGENCE_FEED empty.
+# ---------------------------------------------------------------------------------------------------
+egress:
+  dnsNamespace: kube-system
+  destinations:
+    IDENTITY_PROVIDER:
+      hosts: ["login.microsoftonline.com", "accounts.google.com"]
+      cidrs: ["0.0.0.0/0"]
+      ports: [443]
+    SECRETS_STORE:
+      hosts: []
+      cidrs: []
+      ports: [8200, 443]
+    KEY_MANAGEMENT:
+      hosts: []
+      cidrs: []
+      ports: [443]
+    CONNECTOR_ALLOWLIST:
+      hosts: []
+      cidrs: ["0.0.0.0/0"]
+      ports: [443]
+    WEBHOOK_ALLOWLIST:
+      hosts: ["hooks.slack.com", "slack.com"]
+      cidrs: ["0.0.0.0/0"]
+      ports: [443]
+    MAIL_RELAY:
+      hosts: ["smtp.example.com"]
+      cidrs: ["10.0.0.0/8"]
+      ports: [587, 465]
+    INTELLIGENCE_FEED:
+      hosts: []
+      cidrs: []
+      ports: [443]
+    MODEL_PROVIDER:
+      hosts: []
+      cidrs: []
+      ports: [443]
+    PUBLIC_INBOUND:
+      hosts: []
+      cidrs: []
+      ports: []
+
+# SMTP relays the operator vouches for (host:port). Only these may sit on a private address and only
+# those in cleartextRelays may be spoken to without TLS (a relay behind the mesh's own mTLS).
+smtp:
+  relays: []
+  cleartextRelays: []
+
+# The scheduled re-scan worker (Trivy + a ticker), off by default: it needs a signed ingestion
+# credential a human issues first.
+# Outbound connectors (DOC-21): Jira Cloud, Jira Data Center, GitLab, ServiceNow, a signed generic
+# webhook. Every kind is an option; an air-gapped estate lists the kinds it allows and the interface
+# states the consequence of each disabled kind (PRD-CON-054). Empty = every kind.
+connectors:
+  enabledKinds: []
+  # Days before a connector credential expires that its owner is warned (PRD-CON-023).
+  expiryWarningDays: 14
+
+# Self-hosted model endpoints the operator vouches for (ADR-075, PRD-AIC-025): base URLs a tenant may
+# configure as an AI provider although they are private or http inside the mesh. Empty = public https only.
+ai:
+  modelEndpoints: []
+
+scanner:
+  enabled: false
+  image:
+    repository: ghcr.io/example/aspm-scanner
+    tag: ""
+    digest: ""
+  tickSeconds: 900
+  credentialKeyIdKey: scan-key-id
+  credentialSecretKey: scan-secret
+
+podSecurity:
+  runAsUser: 10001
+  fsGroup: 10001
+
+podDisruptionBudget:
+  app:
+    minAvailable: 1
+  worker:
+    minAvailable: 1
+
+# Bootstrap password for the seeded administrator (ADR-059). Key under the secrets mount.
+bootstrapPasswordKey: bootstrap-password

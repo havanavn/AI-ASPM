@@ -34,13 +34,37 @@ ALTER TABLE ai_suggestion ADD CONSTRAINT ck_ai_suggestion__subject CHECK (
     subject_kind = ANY (ARRAY['ASSET', 'FINDING', 'ORG_NODE', 'ASSESSMENT_REQUEST',
                               'RISK_EXCEPTION']));
 
-ALTER TABLE ai_suggestion DROP CONSTRAINT IF EXISTS ck_ai_suggestion__kind;
-ALTER TABLE ai_suggestion ADD CONSTRAINT ck_ai_suggestion__kind CHECK (
-    suggestion_kind = ANY (ARRAY[
-        'RECURRING_WEAKNESS', 'REMEDIATION_DRAFT', 'DUPLICATE_CANDIDATE',
-        'SEVERITY_REVIEW', 'NARRATIVE_DRAFT',
-        'OWNERSHIP_ROUTING', 'INTAKE_CLASSIFICATION',
-        'COVERAGE_CAVEAT', 'EXCEPTION_BRIEF']));
+-- The kinds this migration adds: COVERAGE_CAVEAT and EXCEPTION_BRIEF.
+-- Guarded, because the migration runner re-applies every file: an unconditional DROP/ADD here fails the
+-- moment a LATER migration has widened this list and rows of the wider kinds exist. The block replaces
+-- the constraint only when the one in place is missing a kind this migration needs; a superset stands.
+DO $$
+DECLARE
+    current_def text;
+    wanted      text[] := ARRAY['RECURRING_WEAKNESS', 'REMEDIATION_DRAFT', 'DUPLICATE_CANDIDATE', 'SEVERITY_REVIEW', 'NARRATIVE_DRAFT', 'OWNERSHIP_ROUTING', 'INTAKE_CLASSIFICATION', 'COVERAGE_CAVEAT', 'EXCEPTION_BRIEF'];
+    k           text;
+    complete    boolean;
+BEGIN
+    SELECT pg_get_constraintdef(oid) INTO current_def FROM pg_constraint
+     WHERE conname = 'ck_ai_suggestion__kind' AND conrelid = 'ai_suggestion'::regclass;
+    complete := current_def IS NOT NULL;
+    IF complete THEN
+        FOREACH k IN ARRAY wanted LOOP
+            IF position(quote_literal(k) IN current_def) = 0 THEN
+                complete := false;
+            END IF;
+        END LOOP;
+    END IF;
+    -- Absent: left to the migration that carries the full list (V078). Creating this narrower one
+    -- would fail against rows of kinds later migrations added, and on a fresh database V046 has
+    -- already created it, so this branch only runs on a database mid-repair.
+    IF current_def IS NOT NULL AND NOT complete THEN
+        ALTER TABLE ai_suggestion DROP CONSTRAINT IF EXISTS ck_ai_suggestion__kind;
+        EXECUTE 'ALTER TABLE ai_suggestion ADD CONSTRAINT ck_ai_suggestion__kind CHECK (suggestion_kind = ANY (ARRAY['
+                || array_to_string(ARRAY(SELECT quote_literal(x) FROM unnest(wanted) x), ', ') || ']))';
+    END IF;
+END
+$$;
 
 ALTER TABLE ai_capability DROP CONSTRAINT IF EXISTS ck_ai_capability__subject;
 ALTER TABLE ai_capability ADD CONSTRAINT ck_ai_capability__subject CHECK (

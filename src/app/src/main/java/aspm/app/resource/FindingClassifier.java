@@ -8,6 +8,9 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Locale;
 import java.util.Objects;
 import javax.sql.DataSource;
@@ -53,7 +56,16 @@ public final class FindingClassifier {
     private final aspm.app.audit.AuditTrail audit =
             new aspm.app.audit.AuditTrail(java.time.Clock.systemUTC());
 
+    /** The model path of ADR-075; every call falls back to the rules above. */
+    private final ModelNarrator narrator;
+
     public FindingClassifier(DataSource dataSource) {
+        this(dataSource, new ModelNarrator(dataSource));
+    }
+
+    /** With the narrator the caller chose — the harness passes one without the cache. */
+    public FindingClassifier(DataSource dataSource, ModelNarrator narrator) {
+        this.narrator = Objects.requireNonNull(narrator);
         this.dataSource = Objects.requireNonNull(dataSource, "a data source is required");
     }
 
@@ -166,11 +178,119 @@ public final class FindingClassifier {
         }
 
         String[] labels = labelFor(principal, category, owasp, cwe);
-        return new Proposal(category, labels[0], owasp, labels[1], cwe, labels[2],
+        Proposal rules = new Proposal(category, labels[0], owasp, labels[1], cwe, labels[2],
                 String.join("; ", basis),
                 // A band, never a percentage (ADR-038). Two independent signals agreeing is the most
                 // these rules can claim.
                 basis.size() >= 2 && !"OTHER_TECHNICAL".equals(category) ? "MEDIUM" : "LOW");
+        return withModel(principal, title, description, findingClass, rules);
+    }
+
+    /** The model's proposal when the tenant enabled `classification.assist` and has a provider; else the rules'. */
+    private Proposal withModel(Principal principal, String title, String description, String findingClass, Proposal rules)
+            throws SQLException {
+        if (!capabilityEnabled(principal, CAPABILITY)) {
+            return rules;
+        }
+        return classifyWithModel(principal, title, description, findingClass, rules).orElse(rules);
+    }
+
+    public static final String CAPABILITY = "classification.assist";
+    public static final String PROMPT_VERSION = "classify/v1";
+
+    /**
+     * {@code PRD-AIC-032} applied: the model chooses from the tenant's lists and nothing else; a code not
+     * on a list is a rejected reply, not a repaired one. The rules' answer is given to the model as a fact
+     * it may confirm or overrule with a stated reason, and the proposal records which happened.
+     */
+    private static final ThreadLocal<ModelNarrator.Refusal> LAST_REFUSAL = new ThreadLocal<>();
+
+    /** Why the model was not used on the most recent classification on this thread, when it was not. */
+    public Optional<ModelNarrator.Refusal> lastRefusal() {
+        return Optional.ofNullable(LAST_REFUSAL.get());
+    }
+
+    public Optional<Proposal> classifyWithModel(Principal principal, String title, String description, String findingClass,
+            Proposal rules) throws SQLException {
+        LAST_REFUSAL.remove();
+        List<Option> categories = categories(principal);
+        List<Option> owasps = owasp(principal);
+        List<Option> cwes = cwes(principal);
+        java.util.Set<String> categoryCodes = new java.util.HashSet<>();
+        categories.forEach(o -> categoryCodes.add(o.code()));
+        java.util.Set<String> owaspCodes = new java.util.HashSet<>();
+        owasps.forEach(o -> owaspCodes.add(o.code()));
+        owaspCodes.add("NOT_APPLICABLE");
+        java.util.Set<String> cweIds = new java.util.HashSet<>();
+        cwes.forEach(o -> cweIds.add(o.code()));
+        StringBuilder categoryList = new StringBuilder();
+        for (Option o : categories) {
+            categoryList.append(o.code()).append(" = ").append(o.label()).append("; ");
+        }
+        StringBuilder owaspList = new StringBuilder();
+        for (Option o : owasps) {
+            owaspList.append(o.code()).append(" = ").append(o.label()).append("; ");
+        }
+        List<String> facts = ModelNarrator.facts(
+                "finding class recorded by the tool: " + (findingClass == null ? "unknown" : findingClass),
+                "risk categories (code = meaning): " + categoryList,
+                "OWASP Top 10 2025 codes (code = meaning): " + owaspList + "NOT_APPLICABLE = maps to no single entry",
+                "rules-based proposal: category " + rules.executiveRiskCategory() + ", owasp " + rules.owaspCode() + ", cwe " + rules.cweId(),
+                "CWE identifiers must be of the form CWE-<number> and must name a real weakness the text describes");
+        Map<String, String> untrusted = new LinkedHashMap<>();
+        untrusted.put("finding_title", title == null ? "" : title);
+        untrusted.put("finding_description", description == null ? "" : description);
+        Object out = narrator.structured(principal, CAPABILITY, PROMPT_VERSION,
+                "Classify this application security finding: choose the risk category code, the OWASP Top 10 2025 code and the "
+                        + "primary CWE identifier that best describe the weakness in the fenced content. Confirm or overrule the "
+                        + "rules-based proposal, and say why in one sentence.",
+                facts, untrusted, "RECORD",
+                "{\"category\": <one code from the risk categories>, \"owasp\": <one OWASP code or NOT_APPLICABLE>, "
+                        + "\"cwe\": <CWE-<number>>, \"reason\": <one sentence>, \"agrees_with_rules\": <true|false>}", 300);
+        if (!(out instanceof ModelNarrator.Structured structured)) {
+            if (out instanceof ModelNarrator.Refusal refused) {
+                // Kept for the caller: a batch that cannot see the provider's "slow down" collects
+                // one 429 per finding — 181 of them on the first live gateway — instead of stopping.
+                LAST_REFUSAL.set(refused);
+            }
+            return Optional.empty();
+        }
+        Map<String, Object> json = structured.json();
+        String category = text(json.get("category"));
+        String owasp = text(json.get("owasp"));
+        String cwe = text(json.get("cwe")).toUpperCase(Locale.ROOT).replace(" ", "");
+        // PRD-AIC-032: validated against the declared lists; anything else is rejected, not repaired.
+        if (!categoryCodes.contains(category) || !owaspCodes.contains(owasp) || !cwe.matches("CWE-[0-9]{1,5}")) {
+            narrator.reject(principal, structured.invocationId(), "OFF_LIST_CODE");
+            return Optional.empty();
+        }
+        if (!cweIds.isEmpty() && !cweIds.contains(cwe)) {
+            // A CWE the tenant's catalogue does not carry cannot be labelled or linked; the rules' CWE stands.
+            cwe = rules.cweId();
+        }
+        String reason = text(json.get("reason"));
+        if (reason.length() > 400) {
+            reason = reason.substring(0, 400);
+        }
+        boolean agrees = category.equals(rules.executiveRiskCategory()) && owasp.equals(rules.owaspCode()) && cwe.equals(rules.cweId());
+        String[] labels = labelFor(principal, category, owasp, cwe);
+        String basis = "model " + structured.modelIdentity() + " (" + PROMPT_VERSION + "): " + reason
+                + (agrees ? "; agrees with the rules" : "; rules proposed " + rules.executiveRiskCategory() + " / " + rules.owaspCode() + " / " + rules.cweId());
+        return Optional.of(new Proposal(category, labels[0], owasp, labels[1], cwe, labels[2], basis, agrees ? "HIGH" : "MEDIUM"));
+    }
+
+    private static String text(Object value) {
+        return value == null ? "" : String.valueOf(value).strip();
+    }
+
+    boolean capabilityEnabled(Principal principal, String code) throws SQLException {
+        try (Connection connection = open(principal);
+                PreparedStatement s = connection.prepareStatement("SELECT enabled FROM ai_capability WHERE code = ?")) {
+            s.setString(1, code);
+            try (ResultSet r = s.executeQuery()) {
+                return r.next() && r.getBoolean(1);
+            }
+        }
     }
 
     /** The CWE, or CWE-UNKNOWN. Never a plausible-looking number. */

@@ -43,11 +43,27 @@ public final class AuthPages {
         this.secureCookies = secureCookies;
     }
 
+    /** Whether session cookies carry Secure, decided once at start from ASPM_ENVIRONMENT. */
+    public boolean secureCookies() {
+        return secureCookies;
+    }
+
     public SessionPrincipalResolver resolver() {
         return resolver;
     }
 
     // ----------------------------------------------------------------------------------------------
+
+    /**
+     * Federated providers, if the deployment has wired them. Set once at start; null means the
+     * sign-in page offers the password form and nothing else, exactly as before V074.
+     */
+    private volatile aspm.app.identity.federation.IdentityProviderService providers;
+
+    public AuthPages withProviders(aspm.app.identity.federation.IdentityProviderService providers) {
+        this.providers = providers;
+        return this;
+    }
 
     /** {@code GET /sign-in}. */
     public Dispatcher.Response signInForm(Dispatcher.Request request) {
@@ -55,15 +71,32 @@ public final class AuthPages {
         boolean failed = request.query().containsKey("failed");
         boolean signedOut = request.query().containsKey("signed_out");
         boolean expired = request.query().containsKey("expired");
+        // ?local=1 shows the password form even when the tenant has turned local sign-in off: the
+        // break-glass administrator needs a way to reach it, and the server refuses everybody else at
+        // POST regardless of what the page showed (SEC-SEC-002).
+        boolean forceLocal = request.query().containsKey("local");
 
-        String body = "<h1 class=\"auth-title\">" + Html.text(messages.get("auth.signIn.title"))
-                + "</h1><p class=\"auth-lede\">" + Html.text(messages.get("auth.signIn.lede")) + "</p>"
-                // One message for every failure cause. See the class note.
-                + (failed ? AuthLayout.error(messages.get("auth.signIn.failed")) : "")
-                + (expired ? AuthLayout.error(messages.get("auth.signIn.expired")) : "")
-                + (signedOut ? "<div class=\"auth-notice\" role=\"status\">"
-                        + Html.text(messages.get("auth.signIn.signedOut")) + "</div>" : "")
-                + "<form method=\"post\" action=\"\" class=\"auth-form\">"
+        java.util.List<aspm.app.identity.federation.IdentityProviderService.Provider> federated = java.util.List.of();
+        boolean localEnabled = true;
+        if (providers != null) {
+            try {
+                federated = providers.activeForSignIn(resolver.tenantId());
+                localEnabled = providers.localSignInEnabled(resolver.tenantId());
+            } catch (java.sql.SQLException e) {
+                // The page still renders with the password form: a store that cannot list providers
+                // is a store that will refuse the sign-in too, and a blank page tells nobody anything.
+                federated = java.util.List.of();
+            }
+        }
+
+        StringBuilder providerButtons = new StringBuilder();
+        for (var provider : federated) {
+            providerButtons.append("<a class=\"auth-provider\" href=\"/auth/").append(Html.attribute(provider.code()).replace("\"", ""))
+                    .append("/start\">")
+                    .append(Html.text(messages.get("auth.signIn.withProvider", provider.displayName())))
+                    .append("</a>");
+        }
+        String passwordForm = "<form method=\"post\" action=\"\" class=\"auth-form\">"
                 + AuthLayout.firstField(messages, "identifier", "auth.identifier", "text", "", true,
                         "username", "auth.identifier.hint")
                 + AuthLayout.field(messages, "password", "auth.password", "password", "", true,
@@ -73,6 +106,21 @@ public final class AuthPages {
                 + "</form>"
                 + "<p class=\"auth-alt\"><a href=\"/forgot-password\">"
                 + Html.text(messages.get("auth.forgot.link")) + "</a></p>";
+
+        String body = "<h1 class=\"auth-title\">" + Html.text(messages.get("auth.signIn.title"))
+                + "</h1><p class=\"auth-lede\">" + Html.text(messages.get(federated.isEmpty() || (!localEnabled && !forceLocal)
+                        ? (federated.isEmpty() ? "auth.signIn.lede" : "auth.signIn.ledeFederated") : "auth.signIn.ledeBoth")) + "</p>"
+                // One message for every failure cause. See the class note.
+                + (failed ? AuthLayout.error(messages.get("auth.signIn.failed")) : "")
+                + (expired ? AuthLayout.error(messages.get("auth.signIn.expired")) : "")
+                + (signedOut ? "<div class=\"auth-notice\" role=\"status\">"
+                        + Html.text(messages.get("auth.signIn.signedOut")) + "</div>" : "")
+                + (federated.isEmpty() ? "" : "<div class=\"auth-providers\">" + providerButtons + "</div>")
+                + (localEnabled || forceLocal
+                        ? (federated.isEmpty() ? "" : "<p class=\"auth-or\">" + Html.text(messages.get("auth.signIn.orPassword")) + "</p>")
+                                + passwordForm
+                        : "<p class=\"auth-alt\"><a href=\"/sign-in?local=1\">"
+                                + Html.text(messages.get("auth.signIn.breakGlassLink")) + "</a></p>");
 
         return html(AuthLayout.render(messages, "auth.signIn.title", body));
     }

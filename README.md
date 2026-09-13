@@ -92,10 +92,11 @@ Stated plainly, because the product's first principle applies to its own documen
 
 | | |
 |---|---|
-| **Runs** | 193 API and interface operations, each with an annotation class and an enforced permission · 66 migrations over 430 tables · local credential with TOTP · signed-request ingestion for SBOM and SARIF · the audit hash chain · the AI suggestion ledger with deterministic agents |
-| **Narrowed** | Authentication is local only — the federated half of ADR-004 is specified and not built |
-| **Not built** | Notification delivery, outbound connectors, reporting exports, container registry scanning (deferred with its extension points reserved) |
-| **Needs a decision** | An AI provider is tenant configuration and none is set, so AI capabilities fall back to their deterministic path. Two open questions block production sizing: portfolio scale and the secrets vault |
+| **Runs** | 257 API and interface operations, each with an annotation class and an enforced permission · 77 migrations · OIDC sign-in against Okta, Entra ID, Keycloak, Google or any issuer, with local credential and TOTP alongside · signed-request ingestion for SBOM and SARIF · the audit hash chain · the AI suggestion ledger with deterministic agents · notification delivery over SMTP, Slack, Teams and signed webhooks · outbound connectors to Jira, GitLab, ServiceNow and webhooks · scheduled per-recipient reports and the audit evidence export · a secrets store with platform-sealed, Vault, Azure Key Vault, AWS Secrets Manager and Google Secret Manager as options |
+| **Deploys as** | `docker compose` on a laptop, or the Helm chart in `deploy/k8s` — the same artifact as the DOC-15 §4 runtime units behind a service mesh (Istio or Linkerd, or none), TLS at the ingress, deny-by-default egress generated from the deployment model, secrets as mounted files |
+| **Not built** | Container registry scanning (deferred with its extension points reserved) · report templates and branding (the compositions are product-fixed) · the separate match, projection and scheduler units (modelled; run inside the two shipped units) |
+| **AI** | Provider families as options: OpenAI, Azure OpenAI, Anthropic, or any OpenAI-compatible self-hosted server (vLLM, Ollama, LiteLLM) the operator vouches for · the DOC-10 §8 capabilities on the suggestion ledger: score explanation, prioritization with stated divergence, semantic duplicate candidates, classification from the tenant's own lists, executive narrative, remediation drafts · a grounded question over the posture with every claim cited · drafting assistance · per-call invocation records, a daily token budget, an identical-request cache and an egress report · the DOC-10 §10.2 evaluation harness, runnable against the configured provider (ADR-075) |
+| **Needs a decision** | An AI provider is tenant configuration; until one is set every capability runs its deterministic path and says so. One open question blocks production sizing: portfolio scale (OQ-015). The secrets question (OQ-026) is answered by the option set |
 
 ---
 

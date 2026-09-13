@@ -1,6 +1,7 @@
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { RenderFailure } from "@/components/RenderFailure";
 import { api } from "@/lib/api";
 import type { Session } from "@/lib/types";
 import { Shell } from "@/components/Shell";
@@ -113,7 +114,9 @@ function NotFound() {
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <BrowserRouter>
-      <App />
+      <RenderFailure>
+        <App />
+      </RenderFailure>
     </BrowserRouter>
   </StrictMode>,
 );

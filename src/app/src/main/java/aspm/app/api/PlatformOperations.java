@@ -79,6 +79,25 @@ public final class PlatformOperations {
         // The gate is the session's factor state, checked inside each handler. The deviation is that class
         // G declares Classification.PUBLIC while GET /ui/account discloses the caller's own session list —
         // recorded in deploy/README.md rather than resolved by inventing an eighth class.
+        // Federated sign-in (V074, ADR-004, PRD-IAM-001). Class G: there is no session until the
+        // callback has verified the provider's token, and the gate is the handshake state row — found
+        // once and consumed — checked inside the handler.
+        operations.add(new OperationRegistry.Operation("GET", "/auth/{provider}/start",
+                AnnotationClass.G_UNAUTHENTICATED, Optional.empty(), Set.of(), Set.of()));
+        operations.add(new OperationRegistry.Operation("GET", "/auth/callback",
+                AnnotationClass.G_UNAUTHENTICATED, Optional.empty(), Set.of(), Set.of()));
+        // The notification centre and a person's own preferences (V075). Class G on the account
+        // surfaces' reasoning: the subject is the caller's own rows, authorized by identity inside the
+        // handler, and a catalogue permission would hide a person's own notifications from the roleless
+        // principal the bootstrap creates.
+        operations.add(new OperationRegistry.Operation("GET", "/api/ui/notifications",
+                AnnotationClass.G_UNAUTHENTICATED, Optional.empty(), Set.of(), Set.of()));
+        operations.add(new OperationRegistry.Operation("POST", "/api/ui/notifications/{id}/read",
+                AnnotationClass.G_UNAUTHENTICATED, Optional.empty(), Set.of(), Set.of()));
+        operations.add(new OperationRegistry.Operation("GET", "/api/ui/account/notification-preferences",
+                AnnotationClass.G_UNAUTHENTICATED, Optional.empty(), Set.of(), Set.of()));
+        operations.add(new OperationRegistry.Operation("POST", "/api/ui/account/notification-preferences",
+                AnnotationClass.G_UNAUTHENTICATED, Optional.empty(), Set.of(), Set.of()));
         for (String route : java.util.List.of("/change-password", "/step-up")) {
             operations.add(new OperationRegistry.Operation("GET", route,
                     AnnotationClass.G_UNAUTHENTICATED, Optional.empty(), Set.of(), Set.of()));
@@ -541,6 +560,96 @@ public final class PlatformOperations {
         // server-rendered page it mirrors, which is what keeps the step-up requirement: class C and
         // class E are refused by the dispatcher without a fresh second factor, and the interface
         // reacts to that refusal rather than testing for it itself.
+        // Notification channels and routes (V075): where a category is delivered. Reads class A, writes
+        // class E, under ntf.channel.manage — a channel is an egress destination for content about the
+        // estate, which is authority above the notifications it carries.
+        operations.add(new OperationRegistry.Operation("GET", "/api/ui/settings/notification-channels",
+                AnnotationClass.A_SCOPED_READ, Optional.of(aspm.app.notification.NotificationChannelService.MANAGE), Set.of(), Set.of()));
+        operations.add(new OperationRegistry.Operation("GET", "/api/ui/settings/notification-channels/{id}/deliveries",
+                AnnotationClass.A_SCOPED_READ, Optional.of(aspm.app.notification.NotificationChannelService.MANAGE), Set.of(), Set.of()));
+        for (String route : java.util.List.of("/api/ui/settings/notification-channels",
+                "/api/ui/settings/notification-channels/{id}", "/api/ui/settings/notification-channels/{id}/transition",
+                "/api/ui/settings/notification-channels/{id}/verify", "/api/ui/settings/notification-channels/{id}/confirm",
+                "/api/ui/settings/notification-routes")) {
+            operations.add(new OperationRegistry.Operation("POST", route, AnnotationClass.E_CONFIGURATION,
+                    Optional.of(aspm.app.notification.NotificationChannelService.MANAGE), Set.of(), Set.of()));
+        }
+
+        // Outbound connectors (V076, DOC-21). Administration is class A/E under int.connector.manage:
+        // a connector is an egress destination that receives content about findings. Creating a
+        // reference on a finding is class B under int.reference.create, scoped by the finding in the
+        // path; reading references and divergences is class A under the same permission, because a
+        // divergence names a finding and what an external system says about it.
+        operations.add(new OperationRegistry.Operation("GET", "/api/ui/settings/connectors",
+                AnnotationClass.A_SCOPED_READ, Optional.of(aspm.app.integration.ConnectorService.MANAGE), Set.of(), Set.of()));
+        operations.add(new OperationRegistry.Operation("GET", "/api/ui/settings/connectors/{id}/operations",
+                AnnotationClass.A_SCOPED_READ, Optional.of(aspm.app.integration.ConnectorService.MANAGE), Set.of(), Set.of()));
+        for (String route : java.util.List.of("/api/ui/settings/connectors", "/api/ui/settings/connectors/{id}",
+                "/api/ui/settings/connectors/{id}/transition", "/api/ui/settings/connectors/{id}/rotate",
+                "/api/ui/settings/connectors/{id}/probe")) {
+            operations.add(new OperationRegistry.Operation("POST", route, AnnotationClass.E_CONFIGURATION,
+                    Optional.of(aspm.app.integration.ConnectorService.MANAGE), Set.of(), Set.of()));
+        }
+        operations.add(new OperationRegistry.Operation("GET", "/api/ui/findings/{id}/references",
+                AnnotationClass.A_SCOPED_READ, Optional.of("vul.finding.read"), Set.of(), Set.of()));
+        operations.add(new OperationRegistry.Operation("POST", "/api/ui/findings/{id}/references",
+                AnnotationClass.B_SCOPED_WRITE, Optional.of(aspm.app.integration.OutboundReferenceService.CREATE), Set.of(), Set.of()));
+        operations.add(new OperationRegistry.Operation("GET", "/api/ui/outbound-references/divergences",
+                AnnotationClass.A_SCOPED_READ, Optional.of(aspm.app.integration.OutboundReferenceService.CREATE), Set.of(), Set.of()));
+        for (String route : java.util.List.of("/api/ui/outbound-references/{id}/resolve", "/api/ui/outbound-references/{id}/retry")) {
+            operations.add(new OperationRegistry.Operation("POST", route, AnnotationClass.B_SCOPED_WRITE,
+                    Optional.of(aspm.app.integration.OutboundReferenceService.CREATE), Set.of(), Set.of()));
+        }
+
+        // Scheduled reports and audit evidence (V077, DOC-12 §11–§12). Schedules are class A/E under
+        // rpt.schedule.manage — a schedule decides who receives what. "My reports" is the caller's own
+        // artifacts (class A under vul.finding.read, the permission every recipient of a register holds);
+        // the audit evidence export is class A under rpt.evidence.export, as the other exports are class A
+        // under their read permission, and its generation is a report.generated audit event.
+        operations.add(new OperationRegistry.Operation("GET", "/api/ui/settings/report-schedules",
+                AnnotationClass.A_SCOPED_READ, Optional.of(aspm.app.reporting.ReportService.MANAGE), Set.of(), Set.of()));
+        for (String route : java.util.List.of("/api/ui/settings/report-schedules", "/api/ui/settings/report-schedules/{id}",
+                "/api/ui/settings/report-schedules/{id}/recipients", "/api/ui/settings/report-schedules/{id}/transition",
+                "/api/ui/settings/report-schedules/{id}/run")) {
+            operations.add(new OperationRegistry.Operation("POST", route, AnnotationClass.E_CONFIGURATION,
+                    Optional.of(aspm.app.reporting.ReportService.MANAGE), Set.of(), Set.of()));
+        }
+        operations.add(new OperationRegistry.Operation("GET", "/api/ui/reports/artifacts",
+                AnnotationClass.A_SCOPED_READ, Optional.of("vul.finding.read"), Set.of(), Set.of()));
+        operations.add(new OperationRegistry.Operation("GET", "/api/ui/reports/artifacts/{id}/download",
+                AnnotationClass.A_SCOPED_READ, Optional.of("vul.finding.read"), Set.of(), Set.of()));
+        operations.add(new OperationRegistry.Operation("GET", "/api/ui/reports/audit-evidence",
+                AnnotationClass.A_SCOPED_READ, Optional.of(aspm.app.reporting.ReportService.EVIDENCE), Set.of(), Set.of()));
+
+        // The AI surfaces of ADR-075 (V078). Ask and draft are class B under aic.assist.use: each writes an
+        // invocation record and reads only what the caller may read; an answer or a draft is content the
+        // caller then acts on. Usage, budget, the provider probe and the evaluation harness are the
+        // AI-configuration authority's (cfg.ai.manage), class A for reads and class E for writes.
+        for (String route : java.util.List.of("/api/ui/ai/ask", "/api/ui/ai/draft")) {
+            operations.add(new OperationRegistry.Operation("POST", route, AnnotationClass.B_SCOPED_WRITE,
+                    Optional.of(aspm.app.ai.Assistant.USE), Set.of(), Set.of()));
+        }
+        for (String route : java.util.List.of("/api/ui/ai/usage", "/api/ui/ai/evaluations")) {
+            operations.add(new OperationRegistry.Operation("GET", route, AnnotationClass.A_SCOPED_READ,
+                    Optional.of(aspm.app.resource.AiProviderService.MANAGE), Set.of(), Set.of()));
+        }
+        for (String route : java.util.List.of("/api/ui/ai/budget", "/api/ui/ai/evaluate", "/api/ui/ai-providers/{id}/test")) {
+            operations.add(new OperationRegistry.Operation("POST", route, AnnotationClass.E_CONFIGURATION,
+                    Optional.of(aspm.app.resource.AiProviderService.MANAGE), Set.of(), Set.of()));
+        }
+        // Identity providers (V074). Its own permission, iam.idp.manage, restricted and step-up:
+        // a provider decides who may sign in at all, which is authority above user administration.
+        // Reads are class A; every write is class E because it is authorization configuration.
+        operations.add(new OperationRegistry.Operation("GET", "/api/ui/access/identity-providers",
+                AnnotationClass.A_SCOPED_READ,
+                Optional.of(aspm.app.identity.federation.IdentityProviderService.MANAGE), Set.of(), Set.of()));
+        for (String route : java.util.List.of("/api/ui/access/identity-providers",
+                "/api/ui/access/identity-providers/{id}", "/api/ui/access/identity-providers/{id}/transition",
+                "/api/ui/access/identity-providers/{id}/test", "/api/ui/access/identity-providers/{id}/group-roles",
+                "/api/ui/access/local-sign-in", "/api/ui/access/users/{id}/break-glass")) {
+            operations.add(new OperationRegistry.Operation("POST", route, AnnotationClass.E_CONFIGURATION,
+                    Optional.of(aspm.app.identity.federation.IdentityProviderService.MANAGE), Set.of(), Set.of()));
+        }
         operations.add(new OperationRegistry.Operation("GET", "/api/ui/access",
                 AnnotationClass.A_SCOPED_READ, Optional.of(aspm.app.ui.AdminPages.READ_USERS),
                 Set.of(), Set.of()));

@@ -52,6 +52,25 @@ public final class PlatformEventTypes {
             "service_credential",
             "principal",
             "role",
+            // A tenant's federated identity provider (V074). Its own aggregate rather than an
+            // attribute of `principal` because configuring Okta or Entra ID changes how EVERY
+            // principal of the tenant may authenticate without touching one principal row; a reader
+            // of a person's history would otherwise see nothing when the door they came through was
+            // replaced.
+            "identity_provider",
+            // A notification channel (V075). Its own aggregate: where a category is delivered is
+            // configuration about the tenant, and a change to it is invisible in the history of any
+            // notification it will carry.
+            "notification_channel",
+            // Outbound connectors and the one-way references they create (V076, DOC-21 §10). Two
+            // aggregates: a connector is configuration an administrator owns; a reference is a decision
+            // about one finding somebody else made, and its history belongs with the finding.
+            "connector",
+            "outbound_reference",
+            // Scheduled reports (V077, DOC-12 §11): a schedule is a disclosure decision about who receives
+            // what; its creation, recipients and lifecycle are the audited actions. The artifacts it
+            // produces are audited as report.generated events, not as an aggregate.
+            "report_schedule",
             // Added when the interface's own write paths began recording. Until then the trail
             // covered the machine doors only — the REST resource endpoint, the two ingestion doors
             // and credential administration — so an action taken through the API left a record and

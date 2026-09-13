@@ -57,6 +57,38 @@ public final class ConnectorHealth {
         this.tenantId = Objects.requireNonNull(tenantId, "tenantId is required (PRD-CON-028 is per tenant)");
     }
 
+    /**
+     * Rehydrates health from its persisted row, so the arithmetic of this class — the threshold, the
+     * half-open probe, the rate — runs over stored state rather than being re-implemented in SQL.
+     */
+    public static ConnectorHealth restore(UUID connectorId, UUID tenantId, Instant lastSuccessAt,
+            int consecutiveFailures, FailureClass lastFailureClass, CircuitState circuitState,
+            String circuitOpenReason, boolean ownerNotified, int attemptsInPeriod, int successesInPeriod) {
+        ConnectorHealth h = new ConnectorHealth(connectorId, tenantId);
+        h.lastSuccessAt = lastSuccessAt;
+        h.consecutiveFailures = Math.max(0, consecutiveFailures);
+        h.lastFailureClass = lastFailureClass;
+        h.circuitState = Objects.requireNonNull(circuitState, "a circuit state is required");
+        h.circuitOpenReason = circuitState == CircuitState.OPEN ? Objects.requireNonNull(circuitOpenReason,
+                "an open circuit carries its reason") : circuitOpenReason;
+        h.ownerNotifiedOfOpenCircuit = ownerNotified;
+        h.attemptsInPeriod = Math.max(0, attemptsInPeriod);
+        h.successesInPeriod = Math.min(h.attemptsInPeriod, Math.max(0, successesInPeriod));
+        return h;
+    }
+
+    public boolean ownerNotified() {
+        return ownerNotifiedOfOpenCircuit;
+    }
+
+    public int attemptsInPeriod() {
+        return attemptsInPeriod;
+    }
+
+    public int successesInPeriod() {
+        return successesInPeriod;
+    }
+
     public void recordSuccess(Instant at) {
         Objects.requireNonNull(at, "the success instant is required");
         this.lastSuccessAt = at;
@@ -94,9 +126,12 @@ public final class ConnectorHealth {
         this.consecutiveFailures++;
 
         if (failureClass.marksConnectorUnhealthy()) {
-            openCircuit("a " + failureClass + " failure: retrying it would lock the account on the target "
-                    + "system, converting a configuration problem in the platform into an outage in the "
-                    + "customer's engineering estate (PRD-CON-024)");
+            openCircuit(failureClass == FailureClass.CONFIGURATION
+                    ? "a CONFIGURATION failure: the target rejected the configuration, and retrying cannot "
+                            + "succeed until an administrator corrects it (PRD-CON-017)"
+                    : "a " + failureClass + " failure: retrying it would lock the account on the target "
+                            + "system, converting a configuration problem in the platform into an outage in the "
+                            + "customer's engineering estate (PRD-CON-024)");
             return;
         }
         if (consecutiveFailures >= CIRCUIT_THRESHOLD) {

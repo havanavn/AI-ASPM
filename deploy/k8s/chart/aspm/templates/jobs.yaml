@@ -1,0 +1,157 @@
+{{- /*
+The migration pipeline of DOC-15 §9.1 as Helm hooks. Migrate runs BEFORE the new application version
+(pre-install / pre-upgrade) as aspm_migrate — the only unit holding migration_runner (OPS-DEP-009) —
+with the same apply.sh the compose deployment runs. Conformance runs AFTER (post-install /
+post-upgrade) as aspm_verify and is what OPS-DEP-031 means by "a cross-tenant assertion before the
+release is considered complete": a failing hook fails the release.
+*/ -}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "aspm.fullname" . }}-pipeline
+  labels:
+    {{- include "aspm.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation
+data:
+  apply.sh: |
+{{ .Files.Get "files/apply.sh" | indent 4 }}
+  conformance.sql: |
+{{ .Files.Get "files/conformance.sql" | indent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "aspm.fullname" . }}-migrate
+  labels:
+    {{- include "aspm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        aspm.io/job: "true"
+      annotations:
+        {{- if eq .Values.mesh.kind "istio" }}
+        sidecar.istio.io/inject: "false"
+        {{- else if eq .Values.mesh.kind "linkerd" }}
+        linkerd.io/inject: "disabled"
+        {{- end }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "aspm.fullname" . }}-migrate
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        fsGroup: 70
+      containers:
+        - name: migrate
+          image: {{ include "aspm.image" .Values.migrateImage | quote }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              export PGPASSWORD="$(cat {{ .Values.secrets.file.mountPath }}/{{ .Values.postgres.migratePasswordKey }})"
+              exec /bin/sh /pipeline/apply.sh
+          env:
+            - name: PGHOST
+              value: {{ .Values.postgres.host | quote }}
+            - name: PGPORT
+              value: {{ .Values.postgres.port | quote }}
+            - name: PGDATABASE
+              value: {{ .Values.postgres.database | quote }}
+            - name: PGUSER
+              value: {{ .Values.postgres.migrateUser | quote }}
+          volumeMounts:
+            - name: pipeline
+              mountPath: /pipeline
+              readOnly: true
+            - name: aspm-secrets
+              mountPath: {{ .Values.secrets.file.mountPath }}
+              readOnly: true
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+      volumes:
+        - name: pipeline
+          configMap:
+            name: {{ include "aspm.fullname" . }}-pipeline
+            defaultMode: 0555
+        {{- include "aspm.secretsVolume" . | nindent 8 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "aspm.fullname" . }}-conformance
+  labels:
+    {{- include "aspm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: conformance
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        aspm.io/job: "true"
+      annotations:
+        {{- if eq .Values.mesh.kind "istio" }}
+        sidecar.istio.io/inject: "false"
+        {{- else if eq .Values.mesh.kind "linkerd" }}
+        linkerd.io/inject: "disabled"
+        {{- end }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "aspm.fullname" . }}-migrate
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        fsGroup: 70
+      containers:
+        - name: conformance
+          image: {{ include "aspm.image" .Values.postgresClientImage | quote }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              export PGPASSWORD="$(cat {{ .Values.secrets.file.mountPath }}/{{ .Values.postgres.verifyPasswordKey }})"
+              exec psql -v ON_ERROR_STOP=1 --no-psqlrc -f /pipeline/conformance.sql
+          env:
+            - name: PGHOST
+              value: {{ .Values.postgres.host | quote }}
+            - name: PGPORT
+              value: {{ .Values.postgres.port | quote }}
+            - name: PGDATABASE
+              value: {{ .Values.postgres.database | quote }}
+            - name: PGUSER
+              value: {{ .Values.postgres.verifyUser | quote }}
+          volumeMounts:
+            - name: pipeline
+              mountPath: /pipeline
+              readOnly: true
+            - name: aspm-secrets
+              mountPath: {{ .Values.secrets.file.mountPath }}
+              readOnly: true
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 200m, memory: 128Mi}
+      volumes:
+        - name: pipeline
+          configMap:
+            name: {{ include "aspm.fullname" . }}-pipeline
+            defaultMode: 0444
+        {{- include "aspm.secretsVolume" . | nindent 8 }}

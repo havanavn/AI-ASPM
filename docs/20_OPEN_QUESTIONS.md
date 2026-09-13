@@ -27,13 +27,13 @@ Maintained continuously. Format per DOC-00 §14.1. Every question carries a **wo
 | Status | Count |
 |---|---|
 | Answered / assumption ratified | 3 |
-| Open, blocking implementation | 2 |
+| Open, blocking implementation | 1 |
 | Open, affecting values not structure | 5 |
 | **Total** | **10** |
 
-**All 26 documents are authored.** No open question blocked authoring: each was carried on a documented working assumption marked at its point of use, per DOC-00 §14.2. **Two now block implementation** rather than documentation, and their character has changed accordingly: OQ-015 because hash partition counts are irreversible after production data, and OQ-026 because three credential paths in the first build block depend on it.
+**All 26 documents are authored.** No open question blocked authoring: each was carried on a documented working assumption marked at its point of use, per DOC-00 §14.2. **One now blocks implementation** rather than documentation: OQ-015, because hash partition counts are irreversible after production data. OQ-026 blocked for the same reason — three credential paths in the first build block depended on it — until it was answered by the option set of ADR-067 on 2026-09-13.
 
-**What the assumptions cost.** Every requirement written against an assumption is structurally sound and numerically provisional. Answering OQ-015 changes one table (DOC-01 §12.1) and the partition thresholds derived from it; answering OQ-026 changes DOC-06 §7 and DOC-15 §7. No document requires restructuring on any answer, which was the purpose of binding targets to named profiles and controls to required properties rather than to figures and products.
+**What the assumptions cost.** Every requirement written against an assumption is structurally sound and numerically provisional. Answering OQ-015 changes one table (DOC-01 §12.1) and the partition thresholds derived from it; OQ-026 was answered without restructuring either DOC-06 §7 or DOC-15 §7, as the contract was written to allow. No document requires restructuring on any answer, which was the purpose of binding targets to named profiles and controls to required properties rather than to figures and products.
 
 ---
 
@@ -112,7 +112,7 @@ These were open questions resolved by ratifying the recommended assumption rathe
 **Impact if wrong.** Moderate.
 **Status.** `Open`
 
-### OQ-026 — Secrets vault: platform-provided or enterprise integration? ⚠️ BLOCKING DOC-06
+### OQ-026 — Secrets vault: platform-provided or enterprise integration?
 **Question.** Does the platform provide its own secrets vault, integrate with an existing enterprise vault, or both?
 **Why it matters.** Test account credentials (`PRD-PTR-004`), connector credentials (`PRD-CON-002`), and secret findings (`PRD-VUL-019`) all depend on it. It is also the platform's largest credential concentration and therefore a primary threat-model input.
 **Blocks.** Build block 1. Three credential paths depend on it: test account credentials (`SEC-PTR-004`), connector credentials (`PRD-CON-021`), and secret finding values (`PRD-VUL-019`). All three are in the first block, and the connector credential store is the platform's highest-value asset (DOC-26 §3.3).
@@ -120,7 +120,8 @@ These were open questions resolved by ratifying the recommended assumption rathe
 **Escalated.** Past its original required-by date.
 **Working assumption.** Integration supported, with a platform-provided default for deployments lacking an enterprise vault.
 **Impact if wrong.** Moderate for the specification: DOC-06 §7 and DOC-15 §7 change; §7's contract accommodates both. **Higher than moderate for the product**: a platform-provided default store is itself a new asset of the highest value and would require its own design review (DOC-06 §18.2).
-**Status.** `Open` · **Escalated**
+**Answer (2026-09-13).** Both, as an option set behind one contract — ADR-067. The platform-sealed store is the default; HashiCorp Vault / OpenBao, Azure Key Vault, AWS Secrets Manager and Google Secret Manager are adapters selected by deployment configuration, with the writer for tenant-entered credentials named explicitly. Tenant and deployment resolution are kept apart so a tenant reference can never reach a deployment secret. The working assumption was what was built; the design review the impact line asked for is ADR-067's consequences section, which names the sealed default's single key as the accepted cost.
+**Status.** `Answered` — by ADR-067.
 
 ### OQ-027 — Per-tenant AI self-hosting in v1?
 **Question.** Must the platform operate models on a tenant's behalf, or is provider choice including self-hosted endpoints sufficient?
@@ -163,6 +164,7 @@ A question past its required-by date with status `Open` MUST be escalated to the
 |---|---|---|---|
 | OQ-015 | 2026-08-04 | Corpus owner | Open. Blocks implementation; an order-of-magnitude figure is sufficient |
 | OQ-026 | 2026-08-04 | Corpus owner | Open. Blocks implementation; three credential paths in build block 1 depend on it |
+| OQ-026 | 2026-09-13 | Chief Software Architect | Answered by ADR-067: a contract with adapters, platform-sealed by default, enterprise stores as options. The three credential paths — test accounts, connectors, secret findings — resolve through it |
 
 Per DOC-00 §14.3, an open question past its required-by date is escalated and recorded. Both were carried on working assumptions through authoring, which was correct; neither can be carried through implementation, because both produce artifacts that are expensive or impossible to change afterwards.
 
@@ -170,6 +172,7 @@ Per DOC-00 §14.3, an open question past its required-by date is escalated and r
 
 | Version | Date | Author | Change | Reviewer |
 |---|---|---|---|---|
+| 1.4.0 | 2026-09-13 | Chief Software Architect | `OQ-026` answered by ADR-067: the secrets store is a contract with adapters — platform-sealed by default, HashiCorp Vault / OpenBao, Azure Key Vault, AWS Secrets Manager and Google Secret Manager as deployment options — with tenant and deployment resolution kept apart. The status summary drops from two implementation-blocking questions to one (OQ-015). The question's text and its working assumption are retained as written; the answer is appended, because the assumption was what was built and the record should show that the platform proceeded on it rather than waited. | Pending |
 | 1.3.0 | 2026-08-25 | Chief Software Architect | Added `OQ-029`, raised by ADR-064. That decision stops duplicate assets being created and deliberately does not repair the ones already recorded, because the repair needs a rule for which of two rows survives when both carry findings, coverage and graph edges — and every candidate rule loses something. Recorded with no working assumption for the same reason as `OQ-028`: the choice depends on what the duplicates actually hold, which nobody has measured. | Pending |
 | 1.2.0 | 2026-08-14 | Chief Software Architect | Added `OQ-028`, raised by ADR-060 rather than by review: the RUNTIME identity class declares an input that a DAST result against a URL does not carry, and the parser holds such results in quarantine instead of substituting a value. Recorded with NO working assumption, which is a departure from every other entry here and is deliberate — the other assumptions bind figures and products, this one would bind what identity means for a class of finding, and DOC-03 §8.5 is explicit that the first version of an identity rule is the least informed. | Pending |
 | 0.1.0 | 2026-08-04 | Staff Product Manager | Seeded with three ratified assumptions and seven open questions arising from DOC-01. |

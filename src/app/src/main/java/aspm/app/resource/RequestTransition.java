@@ -314,6 +314,21 @@ public final class RequestTransition {
                             // closure a requester was promised, and the transition log does not carry
                             // it — it belongs to the credential, which no longer exists to be asked.
                             "held_credentials_destroyed", Boolean.valueOf(isTerminal(connection, toState))));
+            // PRD-NTF-013: recorded in the same transaction as the transition, delivered later by the
+            // worker. The audience is who raised the request and who is delivering it; the actor is
+            // never told what they just did.
+            aspm.app.notification.Notifier.request(connection, requestId).ifPresent(subject -> {
+                try {
+                    aspm.app.notification.Notifier.emit(connection, principal.tenantId(),
+                            new aspm.app.notification.Notifier.Event("request.transitioned", "ASSESSMENT_REQUEST", requestId,
+                                    subject.scopeNodeId(), subject.label(), Optional.of(principal.principalId()),
+                                    aspm.app.notification.Notifier.displayName(connection, principal.principalId()),
+                                    java.util.Map.of("state", toState), Optional.of("/board/" + requestId)),
+                            aspm.app.notification.Notifier.requestAudience(connection, requestId));
+                } catch (SQLException e) {
+                    throw new IllegalStateException(e);
+                }
+            });
             return new Outcome.Applied(state, toState, false);
         });
     }

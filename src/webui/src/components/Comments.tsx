@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { MessageSquare, Send } from "lucide-react";
 import { api } from "@/lib/api";
+import { DraftButton } from "@/components/DraftButton";
 import { Prose } from "@/components/Prose";
 import { RichText } from "@/components/RichTextLazy";
 import { Button } from "@/components/ui/button";
@@ -95,7 +96,8 @@ export function Comments({ comments, postTo, uploadTo, finding = null, onPosted 
           <RichText value={draft} onChange={setDraft} uploadTo={uploadTo} finding={finding}
                     minHeight="7rem" />
           {error && <p className="text-xs text-destructive">{error}</p>}
-          <div className="flex justify-end">
+          <div className="flex items-center justify-between gap-2">
+            <DraftButton kind="COMMENT" notes={draft} onDraft={(text) => setDraft(text)} />
             <Button size="sm" disabled={busy || draft.trim() === ""} onClick={post}>
               <Send /> {busy ? "Posting…" : "Post comment"}
             </Button>

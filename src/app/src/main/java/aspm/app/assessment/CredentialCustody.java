@@ -69,6 +69,24 @@ public final class CredentialCustody {
      * <p>Empty is a supported state, not an error: a deployment that never lodges a password needs
      * no key. What is not supported is lodging one without it.
      */
+    /**
+     * The deployment's custody, bound once by the entry point after {@code ASPM_CREDENTIAL_KEY_REF} has
+     * been resolved ({@code OPS-DEP-020}), so a service that builds its own custody "from the
+     * environment" gets the resolved key rather than {@code System.getenv()}, which never carries it
+     * when the key arrives as a mounted file. Unbound, it reads the process environment, which is the
+     * laptop case.
+     */
+    private static volatile CredentialCustody deployment;
+
+    public static void bindDeployment(CredentialCustody custody) {
+        deployment = java.util.Objects.requireNonNull(custody);
+    }
+
+    public static CredentialCustody fromDeployment() {
+        CredentialCustody bound = deployment;
+        return bound != null ? bound : from(System.getenv());
+    }
+
     public static CredentialCustody from(java.util.Map<String, String> environment) {
         String encoded = environment.get(KEY_VARIABLE);
         if (encoded == null || encoded.isBlank()) {

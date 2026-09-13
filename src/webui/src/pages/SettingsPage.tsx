@@ -2,6 +2,10 @@ import { Link, useSearchParams } from "react-router-dom";
 import { CalendarCog, Settings2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AiProviders } from "@/components/AiProviders";
+import { NotificationChannels } from "@/components/NotificationChannels";
+import { Connectors } from "@/components/Connectors";
+import { ReportSchedules } from "@/components/ReportSchedules";
+import { AiUsage } from "@/components/AiUsage";
 import { AlertSubscriptions, RescanSchedule } from "@/components/ServiceCredentials";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { EndpointEnvironments } from "@/components/EndpointEnvironments";
@@ -44,7 +48,10 @@ export function SettingsPage() {
   const [params, setParams] = useSearchParams();
   const requested = params.get("tab");
   const tab = requested === "integrations" ? "integrations"
-    : requested === "fields" ? "fields" : "ai";
+    : requested === "fields" ? "fields"
+    : requested === "notifications" ? "notifications"
+    : requested === "connectors" ? "connectors"
+    : requested === "reports" ? "reports" : "ai";
 
   return (
     <div className="flex flex-col gap-4 p-4 md:p-6">
@@ -70,9 +77,30 @@ export function SettingsPage() {
                  onClick={() => setParams({ tab: "integrations" }, { replace: true })}>
           Outbound and scheduled
         </TabLink>
+        {/* Where people are told. Email, Slack, Teams and webhooks as options, routed per category. */}
+        <TabLink active={tab === "notifications"}
+                 onClick={() => setParams({ tab: "notifications" }, { replace: true })}>
+          Notifications
+        </TabLink>
+        {/* Where findings can be pushed as tickets. Jira, GitLab, ServiceNow, a webhook — one way, scoped. */}
+        <TabLink active={tab === "connectors"}
+                 onClick={() => setParams({ tab: "connectors" }, { replace: true })}>
+          Connectors
+        </TabLink>
+        {/* Scheduled per-recipient reports and the audit evidence export. */}
+        <TabLink active={tab === "reports"}
+                 onClick={() => setParams({ tab: "reports" }, { replace: true })}>
+          Reports
+        </TabLink>
       </div>
 
-      {tab === "fields" ? (
+      {tab === "notifications" ? (
+        <NotificationChannels />
+      ) : tab === "connectors" ? (
+        <Connectors />
+      ) : tab === "reports" ? (
+        <ReportSchedules />
+      ) : tab === "fields" ? (
         // Both halves of the inventory's vocabulary, on one tab. A declared field is what the
         // platform asks ABOUT an asset; an endpoint environment is where it asks for a host. They are
         // administered by the same person under the same permission, and a separate tab for the
@@ -84,6 +112,7 @@ export function SettingsPage() {
       ) : tab === "ai" ? (
         <div className="flex flex-col gap-5">
           <AiProviders />
+          <AiUsage />
           <Card>
             <CardHeader className="pb-2">
               <CardTitle>What an agent will and will not be allowed to do</CardTitle>

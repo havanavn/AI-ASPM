@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { NotificationPreferences } from "@/components/NotificationPreferences";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Pager, usePaging } from "@/components/Paging";
 
@@ -149,6 +150,8 @@ export function AccountPage() {
           </CardContent>
         </Card>
       </div>
+
+      <NotificationPreferences />
 
       <Card className="overflow-hidden">
         <CardHeader>

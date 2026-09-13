@@ -285,6 +285,7 @@ Tenants declare, per category, whether it may enter model context. Enforcement i
 |---|---|---|---|---|
 | `PRD-AIC-045` | Where a capability's suggestion diverges from a deterministic computation, the divergence MUST be stated with its reason rather than presented as the computation's result. | Silent divergence makes the deterministic result appear to be something it is not, which undermines the reproducibility the deterministic path exists to provide. | M | AT |
 | `PRD-AIC-046` | Executive narrative MUST lead with coverage limitation where confidence is `INSUFFICIENT`, and MUST NOT present a posture figure as the primary statement. | Its audience is least able to detect an error and most likely to act on it. A confident narrative over incomplete data is PP-1 violated at the point of maximum consequence. | M | AT, MT |
+| `PRD-AIC-057` | A question a person asks about the posture in natural language MUST be answered only from projections the platform composed within that person's scope, with every claim citing the fact it rests on; an answer with an unresolvable citation, an uncited claim, or a figure absent from the facts MUST be rejected rather than shown, and where the facts cannot answer the question the capability MUST say so. | The largest user population reads dashboards it did not design and asks the security team what they mean; a grounded answer with citations moves that question off the team without moving the authority. The three rejection conditions are the three ways a fluent answer becomes a wrong one, and the reader of a fluent answer is the least able to notice. Stating insufficiency is PP-1 applied to a question: a model that answers over missing data produces the confident wrong statement §8.1 exists to prevent. | M | AT, MT |
 
 ---
 
@@ -355,7 +356,7 @@ AI consumption scales with usage rather than with seats, so an unbounded capabil
 
 ## 12. Requirements
 
-Thirty-six requirements, `PRD-AIC-021` – `056`, all `MUST_HAVE` except `PRD-AIC-038` and `PRD-AIC-052`.
+Thirty-seven requirements, `PRD-AIC-021` – `057`, all `MUST_HAVE` except `PRD-AIC-038` and `PRD-AIC-052`.
 
 | Group | IDs | Count |
 |---|---|---|
@@ -365,7 +366,7 @@ Thirty-six requirements, `PRD-AIC-021` – `056`, all `MUST_HAVE` except `PRD-AI
 | Grounding | `030` – `034` | 5 |
 | Injection defence | `035` – `038` | 4 |
 | Data governance | `039` – `044` | 6 |
-| Capabilities | `045` – `046` | 2 |
+| Capabilities | `045` – `046`, `057` | 3 |
 | Fallbacks | `047` – `048` | 2 |
 | Evaluation | `049` – `052` | 4 |
 | Cost | `053` – `056` | 4 |
@@ -404,6 +405,7 @@ The domain's distinctive risk is indirect prompt injection reachable without pla
 
 | Version | Date | Author | Change | Reviewer |
 |---|---|---|---|---|
+| 1.1.0 | 2026-09-13 | Chief Software Architect; Principal Security Architect | Added `PRD-AIC-057`, grounded question answering over the posture, as the seventh capability. It is written as an extension of §8, not a relaxation of §5: the answer is composed from the same projections a dashboard reads, within the same scope (`PRD-AIC-030`), and the three rejection conditions restate `PRD-AIC-033` and `PRD-AIC-034` for a surface where the reader chose the question. Recorded here because ADR-075 delivers the capabilities ADR-044 deferred, and the one capability the catalogue of §8 did not name needed a requirement before it could be built against one. The grounding contract gained two fields — the caller's question and the caller's notes — and the injection corpus was extended for both (`PRD-AIC-051`). | Pending |
 | 1.0.0 | 2026-08-04 | Chief Software Architect; Principal Security Architect; Staff Product Manager | Initial content-complete version. States ADR-005 as two architectural properties — no write grant, no dependency edge — rather than as policy. Specifies provider abstraction with residency and training-consent constraints; the suggestion ledger with promotion through the ordinary operation; grounding contracts with numeric substitution rather than validation so that incorrect numbers are unrepresentable; eight-layer injection defence with containment identified as load-bearing and the residual honestly assessed; category-based data governance enforced at context assembly with four categories never permitted; six capability specifications with sources, citation granularity, prohibitions, and fallbacks; non-AI fallbacks for every capability with what is lost stated; an evaluation harness with five absolute thresholds and three rate thresholds gating release; and cost control prohibiting automatic invocation on view. Thirty-six requirements. | Pending |
 
 ---

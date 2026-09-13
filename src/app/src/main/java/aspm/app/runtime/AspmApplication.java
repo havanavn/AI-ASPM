@@ -30,7 +30,13 @@ public final class AspmApplication {
     }
 
     public static void main(String[] args) throws Exception {
-        Map<String, String> environment = System.getenv();
+        // Deployment secrets may arrive as mounted files named by ASPM_*_REF variables (OPS-DEP-019,
+        // OPS-DEP-020): resolved once here into an in-memory copy, so no consumer below needs to know.
+        Map<String, String> environment = aspm.app.secrets.Secrets.expandDeploymentReferences(System.getenv());
+        aspm.app.resource.ObjectStore.bindDeploymentEnvironment(environment);
+        // Self-hosted model endpoints the operator vouches for (ADR-075): the one way a private
+        // address may be a model provider.
+        aspm.app.ai.ModelEndpoints.bind(environment);
 
         DataSource dataSource = dataSource(environment);
 
@@ -55,6 +61,60 @@ public final class AspmApplication {
                             + "; each must change it at first sign-in");
         }
 
+        // The secrets store (ADR-052) and the federation wiring (ADR-004, V074). The egress guard is the
+        // single enforcement point for every destination a tenant configures (TST-AUZ-001).
+        aspm.app.secrets.Secrets secrets = aspm.app.secrets.Secrets.fromEnvironment(environment, dataSource);
+        aspm.app.egress.EgressGuard egress = aspm.app.egress.EgressGuard.production();
+        var oidc = new aspm.app.identity.federation.OidcClient(egress);
+        var providerService = new aspm.app.identity.federation.IdentityProviderService(
+                dataSource, secrets, oidc, egress);
+        authPages.withProviders(providerService);
+        // The public base URL is what the redirect URI is built from and is registered at every
+        // provider. It is configuration, never the Host header: a redirect URI derived from a request
+        // is a redirect an attacker chooses. Absent means federation is configured-but-disabled, and the
+        // administration page says so rather than offering a sign-in button that cannot work.
+        String publicBaseUrl = environment.getOrDefault("ASPM_PUBLIC_BASE_URL", "").strip();
+        if (!publicBaseUrl.isEmpty() && !publicBaseUrl.startsWith("https://")
+                && !"development".equalsIgnoreCase(environment.getOrDefault("ASPM_ENVIRONMENT", ""))) {
+            throw new IllegalStateException("ASPM_PUBLIC_BASE_URL must be https outside a development environment: "
+                    + "the OIDC redirect URI carries the authorization code, and http would carry it in the clear");
+        }
+        aspm.app.identity.FederatedSignIn federatedSignIn = publicBaseUrl.isEmpty() ? null
+                : new aspm.app.identity.FederatedSignIn(dataSource, tenantId, secrets, oidc, providerService, publicBaseUrl);
+        Federation federation = new Federation(providerService, federatedSignIn);
+
+        // Notification delivery (V075, ADR-054). The senders a deployment ships; the worker that drains
+        // the outbox runs here only when ASPM_ROLE is `all` (compose) or `worker` (the general-workers
+        // unit of DOC-15 §4); the application tier alone (`app`) enqueues and never sends.
+        var senders = aspm.app.notification.DeliveryWorker.defaultSenders(egress, environment);
+        var channelService = new aspm.app.notification.NotificationChannelService(dataSource, secrets, senders);
+        // Named runtimeUnit, not "role": it is the DOC-15 §4 runtime unit this process plays, and the
+        // SEC-AUZ-050 build gate rightly refuses to see anything called a role compared to a literal.
+        String runtimeUnit = environment.getOrDefault("ASPM_ROLE", "all").strip().toLowerCase(java.util.Locale.ROOT);
+        if (!java.util.List.of("all", "app", "worker").contains(runtimeUnit)) {
+            throw new IllegalStateException("ASPM_ROLE must be all, app or worker");
+        }
+        aspm.app.notification.DeliveryWorker worker = "app".equals(runtimeUnit) ? null
+                : new aspm.app.notification.DeliveryWorker(dataSource, tenantId, secrets, senders);
+
+        // Outbound connectors (V076, DOC-21): Jira, GitLab, ServiceNow and a signed webhook as options.
+        // Kinds may be disabled per deployment (ASPM_CONNECTOR_KINDS) for an air-gapped estate; the
+        // worker that drains the connector outbox follows the same unit rule as notification delivery.
+        var adapters = aspm.app.integration.TrackerAdapters.all(egress);
+        var enabledKinds = aspm.app.integration.TrackerAdapters.enabledKinds(environment);
+        var connectorService = new aspm.app.integration.ConnectorService(dataSource, secrets, adapters, enabledKinds);
+        var referenceService = new aspm.app.integration.OutboundReferenceService(dataSource);
+        // Scheduled reports (V077, DOC-12 §11): rendered per recipient by the worker unit; files in the
+        // export bucket; the audit evidence export on demand through the same renderer.
+        var reportService = new aspm.app.reporting.ReportService(dataSource, new aspm.app.resource.ObjectStore(environment),
+                new aspm.app.reporting.ReportRenderer(dataSource, new aspm.app.resource.VulnerabilityQuery(dataSource)));
+        aspm.app.reporting.ReportWorker reportWorker = "app".equals(runtimeUnit) ? null
+                : new aspm.app.reporting.ReportWorker(dataSource, tenantId, reportService);
+        aspm.app.integration.ConnectorWorker connectorWorker = "app".equals(runtimeUnit) ? null
+                : new aspm.app.integration.ConnectorWorker(dataSource, tenantId, secrets, adapters, enabledKinds,
+                        publicBaseUrl.isEmpty() ? java.util.Optional.empty() : java.util.Optional.of(publicBaseUrl),
+                        Integer.parseInt(environment.getOrDefault("ASPM_CONNECTOR_EXPIRY_WARNING_DAYS", "14")));
+
         PrincipalResolver principals = "true".equalsIgnoreCase(
                 environment.getOrDefault(DevPrincipalResolver.ENABLE_VARIABLE, ""))
                 ? DevPrincipalResolver.enabledFrom(environment).orElseThrow(
@@ -73,14 +133,52 @@ public final class AspmApplication {
                 environment.getOrDefault(DevPrincipalResolver.ENABLE_VARIABLE, "")));
 
         OperationRegistry registry = PlatformOperations.registry();
-        Dispatcher dispatcher = new Dispatcher(registry, routesFor(dataSource, authPages), principals);
+        Dispatcher dispatcher = new Dispatcher(registry, routesFor(dataSource, authPages, federation, channelService, connectorService, referenceService, reportService), principals);
 
         int port = Integer.parseInt(environment.getOrDefault("ASPM_PORT", "8080"));
         HttpRuntime runtime = new HttpRuntime(port, dispatcher, readiness(dataSource));
         runtime.start();
 
         banner(runtime.port(), registry, principals);
-        Runtime.getRuntime().addShutdownHook(new Thread(runtime::close, "aspm-shutdown"));
+        System.Logger log = System.getLogger("aspm");
+        log.log(System.Logger.Level.INFO, "SECRETS (ADR-052): providers in resolution order, * marks the writer:");
+        for (String line : secrets.describe()) {
+            log.log(System.Logger.Level.INFO, "   " + line);
+        }
+        log.log(System.Logger.Level.INFO, "EGRESS: " + egress.description());
+        log.log(System.Logger.Level.INFO, "AI (ADR-075): provider kinds " + aspm.app.ai.ModelClient.KINDS.stream().map(aspm.app.ai.ModelClient.Kind::code).toList()
+                + "; vouched self-hosted endpoints " + (aspm.app.ai.ModelEndpoints.vouched().isEmpty() ? "none (set " + aspm.app.ai.ModelEndpoints.VARIABLE + ")"
+                        : aspm.app.ai.ModelEndpoints.vouched()));
+        log.log(System.Logger.Level.INFO, federatedSignIn == null
+                ? "FEDERATION (ADR-004): not active — set ASPM_PUBLIC_BASE_URL to enable OIDC sign-in; providers may "
+                        + "be configured meanwhile"
+                : "FEDERATION (ADR-004): OIDC sign-in active; redirect URI " + federatedSignIn.redirectUri());
+        if (worker != null) {
+            worker.start();
+            log.log(System.Logger.Level.INFO, "NOTIFICATION DELIVERY (ADR-054): worker running in this process (ASPM_ROLE=" + runtimeUnit
+                    + "); channel kinds " + channelService.kinds());
+            connectorWorker.start();
+            log.log(System.Logger.Level.INFO, "CONNECTORS (DOC-21): worker running in this process; kinds enabled "
+                    + enabledKinds.stream().sorted().toList());
+            reportWorker.start();
+            log.log(System.Logger.Level.INFO, "REPORTS (DOC-12 §11): scheduler running in this process; export bucket "
+                    + (reportService.storageConfigured() ? "configured" : "NOT configured — scheduled reports will fail and say so"));
+        } else {
+            log.log(System.Logger.Level.INFO, "NOTIFICATION DELIVERY (ADR-054): this unit enqueues only (ASPM_ROLE=app); a worker "
+                    + "unit must run to deliver");
+        }
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            if (worker != null) {
+                worker.close();
+            }
+            if (connectorWorker != null) {
+                connectorWorker.close();
+            }
+            if (reportWorker != null) {
+                reportWorker.close();
+            }
+            runtime.close();
+        }, "aspm-shutdown"));
     }
 
     /**
@@ -168,8 +266,17 @@ public final class AspmApplication {
      * check on every addition until somebody edited both — which is the kind of friction that gets
      * resolved by relaxing the check.
      */
+    /** The federation wiring handed to the routes. {@code signIn} is null without a public base URL. */
+    record Federation(aspm.app.identity.federation.IdentityProviderService providers,
+            aspm.app.identity.FederatedSignIn signIn) {
+    }
+
     private static List<Dispatcher.Route> routesFor(DataSource dataSource,
-            aspm.app.ui.AuthPages auth) {
+            aspm.app.ui.AuthPages auth, Federation federation,
+            aspm.app.notification.NotificationChannelService channelService,
+            aspm.app.integration.ConnectorService connectorService,
+            aspm.app.integration.OutboundReferenceService referenceService,
+            aspm.app.reporting.ReportService reportService) {
         List<Dispatcher.Route> routes = new java.util.ArrayList<>();
         routes.add(new Dispatcher.Route("GET", new PathTemplate("/api"),
                 aspm.app.resource.ServiceDocument::get));
@@ -436,6 +543,75 @@ public final class AspmApplication {
                 webApi::analytics));
         routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/composition"),
                 webApi::composition));
+        // Federated sign-in (V074): the handshake routes and the provider administration API.
+        var federationPages = new aspm.app.ui.FederationPages(federation.signIn(), auth.secureCookies());
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/auth/{provider}/start"), federationPages::start));
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/auth/callback"), federationPages::callback));
+        var providerApi = new aspm.app.ui.IdentityProviderApi(federation.providers(), federation.signIn());
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/access/identity-providers"), providerApi::list));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/access/identity-providers"), providerApi::create));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/access/identity-providers/{id}"), providerApi::update));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/access/identity-providers/{id}/transition"),
+                providerApi::transition));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/access/identity-providers/{id}/test"), providerApi::test));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/access/identity-providers/{id}/group-roles"),
+                providerApi::setGroupRoles));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/access/local-sign-in"), providerApi::setLocalSignIn));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/access/users/{id}/break-glass"), providerApi::setBreakGlass));
+        // Notifications (V075): the centre and preferences for the caller, channels and routes for the
+        // administrator.
+        var notificationApi = new aspm.app.ui.NotificationApi(dataSource, auth.resolver(), channelService);
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/notifications"), notificationApi::list));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/notifications/{id}/read"), notificationApi::markRead));
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/account/notification-preferences"), notificationApi::preferences));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/account/notification-preferences"), notificationApi::savePreferences));
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/settings/notification-channels"), notificationApi::listChannels));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/settings/notification-channels"), notificationApi::createChannel));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/settings/notification-channels/{id}"), notificationApi::updateChannel));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/settings/notification-channels/{id}/transition"),
+                notificationApi::transitionChannel));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/settings/notification-channels/{id}/verify"), notificationApi::verifyChannel));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/settings/notification-channels/{id}/confirm"), notificationApi::confirmChannel));
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/settings/notification-channels/{id}/deliveries"),
+                notificationApi::deliveries));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/settings/notification-routes"), notificationApi::setRoutes));
+
+        // Outbound connectors and references (V076, DOC-21 §10).
+        var connectorApi = new aspm.app.ui.ConnectorApi(dataSource, connectorService, referenceService);
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/settings/connectors"), connectorApi::list));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/settings/connectors"), connectorApi::create));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/settings/connectors/{id}"), connectorApi::update));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/settings/connectors/{id}/transition"), connectorApi::transition));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/settings/connectors/{id}/rotate"), connectorApi::rotate));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/settings/connectors/{id}/probe"), connectorApi::probe));
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/settings/connectors/{id}/operations"), connectorApi::operations));
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/findings/{id}/references"), connectorApi::findingReferences));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/findings/{id}/references"), connectorApi::createFindingReference));
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/outbound-references/divergences"), connectorApi::divergences));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/outbound-references/{id}/resolve"), connectorApi::resolve));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/outbound-references/{id}/retry"), connectorApi::retry));
+
+        // Scheduled reports and audit evidence (V077, DOC-12 §11–§12).
+        var reportApi = new aspm.app.ui.ReportApi(dataSource, reportService);
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/settings/report-schedules"), reportApi::list));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/settings/report-schedules"), reportApi::create));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/settings/report-schedules/{id}"), reportApi::update));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/settings/report-schedules/{id}/recipients"), reportApi::setRecipients));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/settings/report-schedules/{id}/transition"), reportApi::transition));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/settings/report-schedules/{id}/run"), reportApi::run));
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/reports/artifacts"), reportApi::artifacts));
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/reports/artifacts/{id}/download"), reportApi::download));
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/reports/audit-evidence"), reportApi::auditEvidence));
+
+        // The AI surfaces (ADR-075, V078).
+        var aiApi = new aspm.app.ui.AiApi(dataSource);
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/ai/ask"), aiApi::ask));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/ai/draft"), aiApi::draft));
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/ai/usage"), aiApi::usage));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/ai/budget"), aiApi::budget));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/ai/evaluate"), aiApi::evaluate));
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/ai/evaluations"), aiApi::evaluations));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/ai-providers/{id}/test"), aiApi::testProvider));
         var accessApi = new aspm.app.ui.AccessApi(dataSource, auth.resolver().tenantId());
         routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/session/keepalive"),
                 accessApi::keepalive));
@@ -606,9 +782,22 @@ public final class AspmApplication {
 
     /** Exposed for tests, which build the same dispatcher rather than a parallel one. */
     public static Dispatcher dispatcherFor(DataSource dataSource, PrincipalResolver principals) {
+        aspm.app.secrets.Secrets secrets = aspm.app.secrets.Secrets.fromEnvironment(
+                Map.of("ASPM_ENVIRONMENT", "development", "ASPM_SECRETS_PROVIDERS", "sealed"), dataSource);
+        aspm.app.egress.EgressGuard egress = aspm.app.egress.EgressGuard.production();
+        var oidc = new aspm.app.identity.federation.OidcClient(egress);
+        var providers = new aspm.app.identity.federation.IdentityProviderService(dataSource, secrets, oidc, egress);
+        var channelService = new aspm.app.notification.NotificationChannelService(dataSource, secrets,
+                aspm.app.notification.DeliveryWorker.defaultSenders(egress, Map.of()));
         return new Dispatcher(PlatformOperations.registry(),
                 routesFor(dataSource, new aspm.app.ui.AuthPages(dataSource,
-                        java.util.UUID.fromString("11111111-1111-1111-1111-111111111111"), false)),
+                        java.util.UUID.fromString("11111111-1111-1111-1111-111111111111"), false),
+                        new Federation(providers, null), channelService,
+                        new aspm.app.integration.ConnectorService(dataSource, secrets, aspm.app.integration.TrackerAdapters.all(egress),
+                                aspm.app.integration.TrackerAdapters.enabledKinds(Map.of())),
+                        new aspm.app.integration.OutboundReferenceService(dataSource),
+                        new aspm.app.reporting.ReportService(dataSource, new aspm.app.resource.ObjectStore(Map.of()),
+                                new aspm.app.reporting.ReportRenderer(dataSource, new aspm.app.resource.VulnerabilityQuery(dataSource)))),
                 principals);
     }
 }

@@ -6,8 +6,10 @@ import { Button } from "@/components/ui/button";
 
 interface Capability {
   code: string; suggestionKind: string; surface: string; dataCategory: string;
-  enabled: boolean; pending: number;
+  enabled: boolean; pending: number; onDemand?: boolean;
 }
+interface RunResult { capability: string; considered: number; proposed: number; detail: string; throttled?: boolean }
+interface Reply { runs: RunResult[]; proposed: number; ranNothing: boolean; throttled?: boolean; retryAfterSeconds?: number }
 
 /**
  * "Analyse with AI" — one button per dashboard, pressed by a person.
@@ -42,29 +44,38 @@ export function AnalyseButton({ surface, onDone }: {
   const [mayRun, setMayRun] = useState(false);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [runs, setRuns] = useState<RunResult[] | null>(null);
+  /** Seconds the provider asked us to wait after a 429; the button re-enables when it reaches zero. */
+  const [wait, setWait] = useState(0);
 
   const load = useCallback(() => {
     api.get<{ capabilities: Capability[]; mayPromote: boolean }>("/api/ui/suggestions?limit=1")
       .then((d) => {
-        setCapabilities(d.capabilities.filter((c) => c.surface === surface));
+        // On-demand capabilities (a typed question, a draft button) are not something this runs.
+        setCapabilities(d.capabilities.filter((c) => c.surface === surface && !c.onDemand));
         setMayRun(d.mayPromote);
       })
       .catch(() => setCapabilities([]));
   }, [surface]);
   useEffect(load, [load]);
+  useEffect(() => {
+    if (wait <= 0) return;
+    const t = setTimeout(() => setWait((w) => w - 1), 1000);
+    return () => clearTimeout(t);
+  }, [wait]);
 
   async function run() {
     setBusy(true);
     setNote(null);
+    setRuns(null);
     try {
-      const r = await api.post<{
-        runs: { capability: string; considered: number; proposed: number; detail: string }[];
-        proposed: number; ranNothing: boolean;
-      }>("/api/ui/agents/analyse", { surface });
+      const r = await api.post<Reply>("/api/ui/agents/analyse", { surface });
+      setRuns(r.runs);
+      if (r.throttled) setWait(Math.max(r.retryAfterSeconds ?? 0, 15));
       setNote(r.ranNothing
         ? "No capability is switched on for this dashboard yet — turn one on in Configuration."
         : r.proposed === 0
-          ? `Nothing new to suggest. ${r.runs.map((x) => x.detail).join(" · ")}`
+          ? "Nothing new to suggest."
           : `${r.proposed} new suggestion${r.proposed === 1 ? "" : "s"} — ${r.runs
               .filter((x) => x.proposed > 0)
               .map((x) => `${x.capability} ${x.proposed}`).join(", ")}`);
@@ -77,9 +88,19 @@ export function AnalyseButton({ surface, onDone }: {
     }
   }
 
-  if (!capabilities || capabilities.length === 0 || !mayRun) return null;
+  if (!capabilities || capabilities.length === 0) return null;
+  if (!mayRun) {
+    // Said, not hidden (PRD-UIX-024): a button that vanishes for want of a permission reads as a
+    // feature that does not work.
+    return (
+      <span className="text-[11px] text-muted-foreground" title="aic.suggestion.promote">
+        Analyse with AI is available to people who may decide on suggestions; your role does not hold that permission.
+      </span>
+    );
+  }
   const enabled = capabilities.filter((c) => c.enabled);
   const sendsRecords = enabled.some((c) => c.dataCategory === "RECORD");
+  const throttledRuns = runs?.filter((x) => x.throttled) ?? [];
 
   return (
     <div className="flex flex-col items-end gap-1">
@@ -91,19 +112,39 @@ export function AnalyseButton({ surface, onDone }: {
             sends record content
           </Badge>
         )}
-        <Button size="sm" variant="secondary" disabled={busy || enabled.length === 0}
+        <Button size="sm" variant="secondary" disabled={busy || enabled.length === 0 || wait > 0}
                 title={enabled.length === 0
                   ? "Nothing is switched on for this dashboard"
                   : `Will run: ${enabled.map((c) => `${c.code} (${c.dataCategory})`).join(", ")}`}
                 onClick={() => void run()}>
           {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-          {busy ? "Analysing…" : "Analyse with AI"}
+          {busy ? "Analysing…" : wait > 0 ? `Provider asked to wait · ${wait}s` : "Analyse with AI"}
           {enabled.length > 0 && (
             <span className="ml-1 tabular text-muted-foreground">{enabled.length}</span>
           )}
         </Button>
       </div>
       {note && <span className="max-w-96 text-right text-[11px] text-muted-foreground">{note}</span>}
+      {throttledRuns.length > 0 && (
+        <span className="max-w-96 text-right text-[11px] text-tone-warn">
+          The model provider rate-limited {throttledRuns.length} capabilit{throttledRuns.length === 1 ? "y" : "ies"};
+          those used the rules or were not attempted. Press again when the wait ends to let the model finish.
+        </span>
+      )}
+      {runs && runs.length > 0 && (
+        <details className="max-w-xl text-[11px] text-muted-foreground">
+          <summary className="cursor-pointer text-right">What each capability did</summary>
+          <ul className="mt-1 flex flex-col gap-0.5 text-left">
+            {runs.map((x) => (
+              <li key={x.capability}>
+                <span className="font-mono text-foreground">{x.capability}</span>
+                {x.throttled && <Badge tone="warn">rate-limited</Badge>}{" "}
+                {x.proposed} proposed of {x.considered} considered — {x.detail}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
       {enabled.length === 0 && (
         <span className="text-[11px] text-tone-unknown">
           {capabilities.length} capabilit{capabilities.length === 1 ? "y" : "ies"} available, none

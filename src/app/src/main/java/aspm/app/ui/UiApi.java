@@ -152,6 +152,8 @@ public final class UiApi {
             // reader to treat one person's word as evidence the platform holds (ADR-066).
             entry.put("attestedCount", row.attestedCount());
             entry.put("lastReviewSource", row.lastReviewSource());
+            entry.put("businessUnitId", row.businessUnitId());
+            entry.put("businessUnitName", row.businessUnitName());
             rows.add(entry);
         }
         List<Map<String, Object>> bars = new ArrayList<>();
@@ -236,9 +238,35 @@ public final class UiApi {
             entry.put("state", window.state());
             entry.put("requestId", window.requestId());
             entry.put("requestCode", window.requestCode());
+            entry.put("teamId", window.teamId());
+            entry.put("teamName", window.teamName());
+            entry.put("assessorId", window.assessorId());
+            entry.put("assessorName", window.assessorName());
             windows.add(entry);
         }
         body.put("windows", windows);
+        // Who a window can be planned FOR: every active team and every assignable person, whether or
+        // not they have led anything yet. The `teams`/`assessors` lists above are filter options and
+        // count only people with work on record; a planner assigning next year's windows needs the
+        // roster, not the history.
+        var teamService = new aspm.app.resource.TeamService(dataSource);
+        List<Map<String, Object>> planTeams = new ArrayList<>();
+        for (var team : teamService.teams(principal)) {
+            if (team.active()) {
+                planTeams.add(Map.of("id", team.id().toString(), "name", team.name(), "members", Long.valueOf(team.members())));
+            }
+        }
+        List<Map<String, Object>> planPeople = new ArrayList<>();
+        for (var member : teamService.assignable(principal)) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("id", member.principalId().toString());
+            entry.put("name", member.displayName() == null || member.displayName().isBlank() ? member.username() : member.displayName());
+            entry.put("teamId", member.teamId() == null ? null : member.teamId().toString());
+            entry.put("teamName", member.teamName());
+            planPeople.add(entry);
+        }
+        body.put("planTeams", planTeams);
+        body.put("planPeople", planPeople);
         // Planning is a narrower authority than raising a request and a wider one than reading the
         // plan. asm.request.schedule already exists for "decide when work happens", which is exactly
         // what a window is; a new permission would need granting in every tenant before the feature
@@ -434,7 +462,8 @@ public final class UiApi {
             }
             drafts.add(new aspm.app.resource.PlanWindows.Draft(target, startsOn, endsOn,
                     uuid(text(window.get("assessmentTypeId"))),
-                    uuid(text(window.get("triggerId"))), text(window.get("note"))));
+                    uuid(text(window.get("triggerId"))), text(window.get("note")),
+                    uuid(text(window.get("teamId"))), uuid(text(window.get("assessorId")))));
         }
         aspm.app.resource.PlanWindows.Created created;
         try {
@@ -481,9 +510,11 @@ public final class UiApi {
                 return rejected("DATES_ORDERED", "endsOn",
                         "the end of a window cannot fall before its start");
             }
+            boolean ownerGiven = payload.containsKey("teamId") || payload.containsKey("assessorId");
             applied = planWindows.update(principal, id, startsOn, endsOn,
                     uuid(text(payload.get("assessmentTypeId"))),
-                    uuid(text(payload.get("triggerId"))), text(payload.get("note")));
+                    uuid(text(payload.get("triggerId"))), text(payload.get("note")),
+                    uuid(text(payload.get("teamId"))), uuid(text(payload.get("assessorId"))), ownerGiven);
         } else {
             applied = switch (state) {
                 case "CANCELLED" -> planWindows.cancel(principal, id);
@@ -869,6 +900,9 @@ public final class UiApi {
             row.put("dataCategory", c.dataCategory());
             row.put("enabled", Boolean.valueOf(c.enabled()));
             row.put("maxPerRun", Integer.valueOf(c.maxPerRun()));
+            // Answers a person from the interface rather than running in a batch; the analyse button
+            // must not list it as something it will run.
+            row.put("onDemand", Boolean.valueOf(aspm.app.resource.TriageAgent.ON_DEMAND.contains(c.code())));
             row.put("pending", Long.valueOf(c.pending()));
             // What this capability's output has been worth, which is the only basis on which the
             // switch above is a decision rather than a preference. Counts, never a percentage: a
@@ -898,7 +932,34 @@ public final class UiApi {
         Map<String, Object> body = request.body().orElse(Map.of());
         boolean promote = !Boolean.FALSE.equals(body.get("promote"));
         String reason = body.get("reason") == null ? null : String.valueOf(body.get("reason"));
+        // PRD-AIC-027: a promoted CLASSIFICATION is applied through the classifier's ordinary operation,
+        // under the permission a person needs to classify by hand — re-validated here, before the
+        // decision is recorded, so a reviewer without it cannot promote what they could not do directly.
+        var pendingOne = suggestions.pending(request.principal(), "CLASSIFICATION", null, 200).stream()
+                .filter(sg -> sg.id().equals(id.toString())).findFirst();
+        if (promote && pendingOne.isPresent() && !request.principal().holds("vul.finding.triage")) {
+            return new Dispatcher.Response(403, Map.of("status", 403, "code", "PROMOTION_NEEDS_TRIAGE",
+                    "message", "applying a classification needs vul.finding.triage, the permission a person needs to classify a finding by hand"), Map.of());
+        }
         if (suggestions.decide(request.principal(), id, promote, reason)) {
+            if (promote && pendingOne.isPresent()) {
+                String category = null;
+                String owasp = null;
+                String cwe = null;
+                for (String ref : pendingOne.get().grounding()) {
+                    if (ref.startsWith("category:")) {
+                        category = ref.substring("category:".length());
+                    } else if (ref.startsWith("owasp:")) {
+                        owasp = ref.substring("owasp:".length());
+                    } else if (ref.startsWith("cwe:")) {
+                        cwe = ref.substring("cwe:".length());
+                    }
+                }
+                if (category != null) {
+                    classifier.apply(request.principal(), UUID.fromString(pendingOne.get().subjectId()), category, owasp, cwe, "AI_ASSISTED",
+                            "promoted from suggestion " + id + ": " + pendingOne.get().detail());
+                }
+            }
             return json(Map.of("state", promote ? "PROMOTED" : "REJECTED"));
         }
         // A promotion that matched nothing has two causes and they need different answers. The
@@ -1238,18 +1299,27 @@ public final class UiApi {
         }
         List<Map<String, Object>> runs = new ArrayList<>();
         int proposed = 0;
+        boolean throttled = false;
+        int retryAfter = 0;
         for (var run : agents.runSurface(request.principal(), surface)) {
             proposed += run.proposed();
+            throttled |= run.throttled();
+            retryAfter = Math.max(retryAfter, run.retryAfterSeconds());
             runs.add(Map.of("capability", run.capability(),
                     "considered", Integer.valueOf(run.considered()),
                     "proposed", Integer.valueOf(run.proposed()),
-                    "detail", run.detail()));
+                    "detail", run.detail(),
+                    "throttled", Boolean.valueOf(run.throttled())));
         }
         return json(Map.of("surface", surface, "runs", runs,
                 "proposed", Integer.valueOf(proposed),
                 // Said explicitly so a button that did nothing can explain why rather than looking
                 // broken: the normal reason is that nothing on this surface is switched on yet.
-                "ranNothing", Boolean.valueOf(runs.isEmpty())));
+                "ranNothing", Boolean.valueOf(runs.isEmpty()),
+                // Said at the top of the reply: whether the model was cut short by its provider
+                // decides whether the person presses again or reads the rules' output as the answer.
+                "throttled", Boolean.valueOf(throttled),
+                "retryAfterSeconds", Integer.valueOf(retryAfter)));
     }
 
     /**
@@ -4706,6 +4776,9 @@ public final class UiApi {
             // and a count of assessments cannot give it.
             entry.put("lastAssessedAt", org.lastAssessedAt());
             entry.put("measured", org.measured());
+            entry.put("breached", org.breached());
+            entry.put("reviewsDue", org.reviewsDue());
+            entry.put("reviewsUnplanned", org.reviewsUnplanned());
             posture.add(entry);
         }
 
@@ -4796,6 +4869,31 @@ public final class UiApi {
                 }).toList()));
         body.put("posture", posture);
         body.put("observations", observations);
+        // The figures behind the observations, as numbers, for the strip an executive reads first.
+        // Same statement as the sentences, so the two cannot disagree (PRD-ASM-024).
+        body.put("figures", new aspm.app.resource.OverviewInsights(dataSource).figures(principal));
+        // The executive briefs the narrative capability has drafted for the caller's organizations,
+        // shown beside the headline rather than buried in the ledger — labelled generated
+        // (PRD-AIC-036), with the facts each one was allowed to draw a number from. Pending only:
+        // a promoted brief has become the organization's own statement and lives on its record.
+        List<Map<String, Object>> briefs = new ArrayList<>();
+        for (var b : suggestions.pending(principal, "NARRATIVE_DRAFT", null, 12)) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("id", b.id());
+            entry.put("subjectId", b.subjectId());
+            entry.put("subjectLabel", b.subjectLabel());
+            entry.put("headline", b.headline());
+            entry.put("detail", b.detail());
+            entry.put("grounding", b.grounding());
+            entry.put("modelIdentity", b.modelIdentity());
+            entry.put("promptVersion", b.promptVersion());
+            entry.put("generatedAt", b.generatedAt());
+            entry.put("freshness", b.freshness());
+            briefs.add(entry);
+        }
+        body.put("briefs", briefs);
+        body.put("mayDecide", Boolean.valueOf(principal.holds(aspm.app.resource.SuggestionLedger.PROMOTE)));
+        body.put("asOf", java.time.Instant.now().toString());
         body.put("kpis", kpis);
         body.put("coverage", coverage);
         body.put("severity", severityRows);

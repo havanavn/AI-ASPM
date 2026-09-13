@@ -102,7 +102,7 @@ public final class IntakeService {
     private final aspm.app.inventory.ProjectQuery projects;
     private final aspm.app.authz.ObjectAuthority authority;
     private final CredentialCustody custody =
-            CredentialCustody.from(System.getenv());
+            CredentialCustody.fromDeployment();
 
     public IntakeService(DataSource dataSource) {
         this.dataSource = Objects.requireNonNull(dataSource, "a data source is required");

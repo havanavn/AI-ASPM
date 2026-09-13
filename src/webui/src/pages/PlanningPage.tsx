@@ -1,8 +1,9 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
-  CalendarClock, CalendarPlus, ChevronDown, ChevronRight, History, Search, Trash2, X,
+  ArrowUpDown, CalendarClock, CalendarPlus, ChevronDown, ChevronRight, History, Search, Trash2, X,
 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { BarList, GroupedColumns, type Slice } from "@/components/Charts";
@@ -20,6 +21,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { PlanWindowDialog, type PlanTarget } from "@/components/PlanWindowDialog";
 import { AttestReviewDialog, type Attestation } from "@/components/AttestReviewDialog";
 import { CoverageTables, type CoverageReport } from "@/components/CoverageTables";
+import { PlanOverview, type Dimension } from "@/components/PlanOverview";
 
 interface PlanRow {
   assetId: string; name: string; orgPath: string | null; criticality: string | null;
@@ -31,6 +33,8 @@ interface PlanRow {
   /** What the engagement is sized from. `apiCount` is null, never 0, where nothing declared one. */
   exposureDeclared: string | null; apiCount: number | null;
   projectCount: number; plannedWindows: number;
+  /** The business unit the application belongs to (the level below the root), for the overview. */
+  businessUnitId: string | null; businessUnitName: string | null;
 }
 /**
  * A project under an application.
@@ -50,6 +54,8 @@ interface PlanWindow {
   startsOn: string; endsOn: string; note: string | null;
   state: "PLANNED" | "CONVERTED" | "CANCELLED";
   requestId: string | null; requestCode: string | null;
+  /** Who is expected to run it (V080); null while undecided. */
+  teamId: string | null; teamName: string | null; assessorId: string | null; assessorName: string | null;
 }
 interface Payload {
   rows: PlanRow[];
@@ -67,7 +73,26 @@ interface Payload {
   attestations: Attestation[];
   mayAttest: boolean;
   statistics: CoverageReport;
+  /** The roster a window can be planned for, whether or not they have led anything yet. */
+  planTeams: { id: string; name: string; members: number }[];
+  planPeople: { id: string; name: string; teamId: string | null; teamName: string | null }[];
 }
+
+type Sort = "urgency" | "name" | "unit" | "due" | "severe" | "api" | "planned";
+const SORTS: { key: Sort; label: string }[] = [
+  { key: "urgency", label: "Urgency (overdue first)" },
+  { key: "due", label: "Next due date" },
+  { key: "severe", label: "Critical + high open" },
+  { key: "unit", label: "Business unit" },
+  { key: "name", label: "Application name" },
+  { key: "api", label: "API count (largest first)" },
+  { key: "planned", label: "Least planned first" },
+];
+const URGENCY: Record<string, number> = { OVERDUE: 0, NEVER: 1, DUE_SOON: 2, CURRENT: 3, NO_OBLIGATION: 4 };
+/** A faint row tint that says the same thing as the status badge, for scanning a long list. */
+const ROW_TINT: Record<string, string> = {
+  OVERDUE: "bg-sev-critical/[0.06]", DUE_SOON: "bg-sev-high/[0.06]", NEVER: "bg-tone-unknown/[0.08]",
+};
 
 /**
  * The cadence states, in the order somebody planning cares about them.
@@ -149,12 +174,36 @@ export function PlanningPage() {
    * nothing left to draw keeps its "no assessment on record" marker instead of disappearing.
    */
   const [kinds, setKinds] = useState<"all" | "review">("all");
+  const [sort, setSort] = useState<Sort>("urgency");
+  /** A browser-side narrowing from the overview that the server has no parameter for: a month, or "due and unplanned". */
+  const [drill, setDrill] = useState<{ dimension: Dimension; id: string | null; label: string } | null>(null);
   const orgs = readList(params, "org");
   const teamIds = readList(params, "team");
   const assessorIds = readList(params, "assessor");
   const unassigned = params.get("unassigned") === "true";
   const filtered = orgs !== null || teamIds !== null || assessorIds !== null || unassigned
-    || query.trim() !== "";
+    || query.trim() !== "" || drill !== null;
+
+  /**
+   * A click on the overview narrows the page. Organization, team and person are URL filters the server
+   * applies (SEC-AUZ-016: the charts must be counts of the filtered population); a month and "due but
+   * unplanned" have no server parameter and are applied to the fetched rows.
+   */
+  function drillTo(dimension: Dimension, id: string | null, label: string) {
+    const search = new URLSearchParams(params);
+    if (id === null) {
+      search.delete("org"); search.delete("team"); search.delete("assessor"); search.delete("unassigned");
+      setDrill(null);
+      setParams(search, { replace: true });
+      return;
+    }
+    if (dimension === "unit" && id !== "__none") { search.set("org", id); setDrill(null); }
+    else if (dimension === "team" && id !== "__unassigned" && id !== "__unplanned") { search.set("team", id); setDrill(null); }
+    else if (dimension === "person" && id !== "__unassigned" && id !== "__unplanned") { search.set("assessor", id); setDrill(null); }
+    else { setDrill({ dimension, id, label }); }
+    setParams(search, { replace: true });
+    document.getElementById("plan-applications")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   /**
    * All four filters live in the URL, and all four go to the SERVER except the search.
@@ -200,6 +249,14 @@ export function PlanningPage() {
    * authorized. Sending it to the server would add a round trip per keystroke to narrow a list of
    * applications that is measured in tens.
    */
+  /** Application of every target a window can point at: the application itself, or its project's root. */
+  const appOf = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const p of data?.projects ?? []) map[p.projectId] = p.assetId;
+    for (const r of data?.rows ?? []) map[r.assetId] = r.assetId;
+    return map;
+  }, [data]);
+
   const searched = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return data?.rows ?? [];
@@ -210,16 +267,59 @@ export function PlanningPage() {
       (data?.projects ?? [])
         .filter((p) => p.name.toLowerCase().includes(needle))
         .map((p) => p.assetId));
+    // Team and assessor names planned on a window match its application: "who has Payments" and "what
+    // does Team Alpha have" are both searches somebody types into this box.
+    const byOwner = new Set(
+      (data?.windows ?? [])
+        .filter((w) => w.state === "PLANNED" && ((w.teamName ?? "").toLowerCase().includes(needle) || (w.assessorName ?? "").toLowerCase().includes(needle)))
+        .map((w) => appOf[w.targetAssetId] ?? w.targetAssetId));
     return (data?.rows ?? []).filter((r) =>
       r.name.toLowerCase().includes(needle)
       || (r.orgPath ?? "").toLowerCase().includes(needle)
-      || byProject.has(r.assetId));
-  }, [data, query]);
+      || (r.businessUnitName ?? "").toLowerCase().includes(needle)
+      || byProject.has(r.assetId)
+      || byOwner.has(r.assetId));
+  }, [data, query, appOf]);
 
-  const rows = useMemo(
-    () => searched.filter((r) => filter === "ALL" || r.status === filter),
-    [searched, filter],
-  );
+  const plannedAppIds = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return new Set((data?.windows ?? []).filter((w) => w.state === "PLANNED" && w.endsOn >= today)
+      .map((w) => appOf[w.targetAssetId] ?? w.targetAssetId));
+  }, [data, appOf]);
+
+  const rows = useMemo(() => {
+    let list = searched.filter((r) => filter === "ALL" || r.status === filter);
+    if (drill) {
+      if (drill.dimension === "month" && drill.id) {
+        const month = drill.id;
+        const appsInMonth = new Set((data?.windows ?? [])
+          .filter((w) => w.state === "PLANNED" && w.startsOn.slice(0, 7) === month)
+          .map((w) => appOf[w.targetAssetId] ?? w.targetAssetId));
+        list = list.filter((r) => appsInMonth.has(r.assetId) || (r.nextDueAt ?? "").slice(0, 7) === month);
+      } else if (drill.id === "__unplanned") {
+        list = list.filter((r) => ["OVERDUE", "NEVER", "DUE_SOON"].includes(r.status) && !plannedAppIds.has(r.assetId));
+      } else if (drill.id === "__unassigned") {
+        const unowned = new Set((data?.windows ?? [])
+          .filter((w) => w.state === "PLANNED" && (drill.dimension === "team" ? !w.teamId : !w.assessorId))
+          .map((w) => appOf[w.targetAssetId] ?? w.targetAssetId));
+        list = list.filter((r) => unowned.has(r.assetId));
+      } else if (drill.dimension === "unit" && drill.id === "__none") {
+        list = list.filter((r) => !r.businessUnitId);
+      }
+    }
+    const byText = (a: string | null | undefined, b: string | null | undefined) => (a ?? "\uffff").localeCompare(b ?? "\uffff");
+    const sorted = [...list];
+    switch (sort) {
+      case "name": sorted.sort((a, b) => a.name.localeCompare(b.name)); break;
+      case "unit": sorted.sort((a, b) => byText(a.businessUnitName, b.businessUnitName) || a.name.localeCompare(b.name)); break;
+      case "due": sorted.sort((a, b) => byText(a.nextDueAt, b.nextDueAt) || a.name.localeCompare(b.name)); break;
+      case "severe": sorted.sort((a, b) => (b.severeOpen - a.severeOpen) || a.name.localeCompare(b.name)); break;
+      case "api": sorted.sort((a, b) => ((b.apiCount ?? -1) - (a.apiCount ?? -1)) || a.name.localeCompare(b.name)); break;
+      case "planned": sorted.sort((a, b) => (a.plannedWindows - b.plannedWindows) || (URGENCY[a.status] ?? 9) - (URGENCY[b.status] ?? 9)); break;
+      default: sorted.sort((a, b) => ((URGENCY[a.status] ?? 9) - (URGENCY[b.status] ?? 9)) || byText(a.nextDueAt, b.nextDueAt) || a.name.localeCompare(b.name));
+    }
+    return sorted;
+  }, [searched, filter, sort, drill, data, appOf, plannedAppIds]);
   const paging = usePaging(rows);
 
   // Full-review requests visible on the timeline, per application. The cadence view only counts a
@@ -382,6 +482,28 @@ export function PlanningPage() {
     // inventing one.
     .map((r) => ({ key: r.assetId, label: r.name, value: r.severeOpen, population: 0 })), [searched]);
 
+  // Every hook above this line, none below: the two early returns that follow would otherwise
+  // change the hook count between the loading render and the loaded one, which React answers with
+  // a blank page rather than a message.
+  const roster = useMemo(() => ({ teams: data?.planTeams ?? [], people: data?.planPeople ?? [] }), [data]);
+
+  /**
+   * The headline figures, from the rows the server filters left — so they agree with every chart
+   * and with the table, and a narrowed page shows a narrowed strip rather than the estate's.
+   */
+  const kpi = useMemo(() => {
+    const due = searched.filter((r) => ["OVERDUE", "NEVER", "DUE_SOON"].includes(r.status));
+    const duePlanned = due.filter((r) => plannedAppIds.has(r.assetId)).length;
+    const planned = (data?.windows ?? []).filter((w) => w.state === "PLANNED");
+    const unowned = planned.filter((w) => !w.teamId && !w.assessorId).length;
+    return {
+      apps: searched.length, overdue: counts.OVERDUE ?? 0, dueSoon: counts.DUE_SOON ?? 0,
+      never: counts.NEVER ?? 0, current: counts.CURRENT ?? 0,
+      due: due.length, duePlanned, coveragePct: due.length === 0 ? null : Math.round((100 * duePlanned) / due.length),
+      planned: planned.length, unowned,
+    };
+  }, [searched, counts, plannedAppIds, data]);
+
   if (failed) {
     return <p className="p-6 text-sm text-muted-foreground">
       The assessment plan could not be loaded. Reload once the service is available.
@@ -405,7 +527,7 @@ export function PlanningPage() {
    * hard-coded colSpan silently under-spans for a reader holding one of them — which shows as a
    * stray empty cell at the end of the expanded row, in their session only.
    */
-  const columnCount = 12 + (data.mayPlan ? 1 : 0)
+  const columnCount = 14 + (data.mayPlan ? 1 : 0)
     + (data.mayPlan || data.maySchedule ? 1 : 0);
   // Counted the same way the filter selects, projection included — a number beside a button has to
   // equal what pressing it draws. Counting only kind === "FULL_REVIEW" made the chip read 43 while
@@ -426,6 +548,26 @@ export function PlanningPage() {
           says is owed next.
         </p>
       </header>
+
+      {/* The strip a head of security reads first. Each tile is a click that applies the matching
+          cadence filter, so the figure and the rows it counts are one gesture apart. Colour repeats
+          the status badge's tone and is never alone: the label says what the number is. */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7">
+        <Kpi label="Applications" value={kpi.apps} tone="neutral" active={filter === "ALL"} onClick={() => setFilter("ALL")} />
+        <Kpi label="Overdue" value={kpi.overdue} tone="critical" active={filter === "OVERDUE"} onClick={() => setFilter("OVERDUE")} />
+        <Kpi label="Due soon" value={kpi.dueSoon} tone="high" active={filter === "DUE_SOON"} onClick={() => setFilter("DUE_SOON")} />
+        <Kpi label="Never assessed" value={kpi.never} tone="unknown" active={filter === "NEVER"} onClick={() => setFilter("NEVER")} />
+        <Kpi label="Current" value={kpi.current} tone="ok" active={filter === "CURRENT"} onClick={() => setFilter("CURRENT")} />
+        <Kpi label="Due work planned" value={kpi.coveragePct === null ? "—" : `${kpi.coveragePct}%`}
+             sub={kpi.due === 0 ? "nothing owed" : `${kpi.duePlanned} of ${kpi.due} due`}
+             tone={kpi.coveragePct === null ? "neutral" : kpi.coveragePct >= 80 ? "ok" : kpi.coveragePct >= 50 ? "high" : "critical"}
+             active={drill?.id === "__unplanned"}
+             onClick={() => drillTo("team", kpi.due - kpi.duePlanned > 0 ? "__unplanned" : null, "Due, not in anybody's plan")} />
+        <Kpi label="Windows without owner" value={kpi.unowned} sub={`of ${kpi.planned} planned`}
+             tone={kpi.unowned > 0 ? "warn" : "ok"}
+             active={drill?.id === "__unassigned"}
+             onClick={() => drillTo("team", kpi.unowned > 0 ? "__unassigned" : null, "No team named")} />
+      </div>
 
       {/* ABOVE the charts, deliberately. Every figure below — the Gantt rows, the coverage bars, the
           monthly load — is computed under these filters. A filter placed beside the table would leave
@@ -488,7 +630,7 @@ export function PlanningPage() {
               <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5
                                  -translate-y-1/2 text-muted-foreground" />
               <Input id="plan-search" value={query} className="pl-7 pr-7"
-                     placeholder="name or organization"
+                     placeholder="application, unit, team or person"
                      onChange={(e) => setQuery(e.target.value)} />
               {query && (
                 <button type="button" onClick={() => setQuery("")}
@@ -550,7 +692,8 @@ export function PlanningPage() {
             {teamIds !== null && ` · ${teamIds.length} team${teamIds.length === 1 ? "" : "s"}`}
             {(assessorIds !== null || unassigned)
               && ` · ${(assessorIds?.length ?? 0) + (unassigned ? 1 : 0)} assessor selection`}
-            {query && ` · matching \u201C${query}\u201D`}.
+            {query && ` · matching \u201C${query}\u201D`}
+            {drill && ` · narrowed to ${drill.label}`}.
           </span>
           {/* Said whenever a team or assessor filter is on, because it changes what the ROWS mean:
               an application with no work by that person is not in the answer, so "never reviewed"
@@ -561,11 +704,21 @@ export function PlanningPage() {
             </span>
           )}
           <button type="button" className="text-primary hover:underline"
-                  onClick={() => { setQuery(""); setParams({}, { replace: true }); }}>
+                  onClick={() => { setQuery(""); setDrill(null); setParams({}, { replace: true }); }}>
             Clear filters
           </button>
         </p>
       )}
+
+      {/* Overview before timeline: the question "who owes what and who is planned for what" is
+          answered per business unit, team, person or month, and a click narrows the rest of the page. */}
+      <PlanOverview rows={searched} windows={data.windows} projects={data.projects} roster={roster}
+                    onDrill={drillTo}
+                    active={drill ? { dimension: drill.dimension, id: drill.id }
+                      : orgs?.length === 1 ? { dimension: "unit", id: orgs[0] ?? null }
+                      : teamIds?.length === 1 ? { dimension: "team", id: teamIds[0] ?? null }
+                      : assessorIds?.length === 1 ? { dimension: "person", id: assessorIds[0] ?? null }
+                      : null} />
 
       <Card>
         <CardHeader className="pb-2">
@@ -653,12 +806,22 @@ export function PlanningPage() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
           <div>
-            <CardTitle>Applications</CardTitle>
+            <CardTitle id="plan-applications">Applications</CardTitle>
             <CardDescription>
-              Ordered by urgency — overdue first, then never assessed, then soonest due.
+              {sort === "urgency" ? "Ordered by urgency — overdue first, then never assessed, then soonest due."
+                : `Ordered by ${SORTS.find((x) => x.key === sort)?.label.toLowerCase()}.`}
+              {" "}Rows are tinted by status; the badge says the same thing in words.
             </CardDescription>
           </div>
           <span className="flex items-center gap-2">
+            <Select value={sort} onValueChange={(v) => setSort(v as Sort)}>
+              <SelectTrigger className="h-8 w-56 text-xs" aria-label="Sort applications">
+                <ArrowUpDown className="size-3.5 text-muted-foreground" /><SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SORTS.map((x) => <SelectItem key={x.key} value={x.key}>{x.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
             {/* Bulk is the whole answer to "the number of applications is large". Planning a year
                 one application at a time is the work this button exists to remove; the dialog states
                 the multiplication before it commits to it. Disabled rather than hidden when nothing
@@ -673,7 +836,7 @@ export function PlanningPage() {
                   (windowsByTarget[r.assetId] ?? []).concat(
                     (projectsByApp[r.assetId] ?? [])
                       .flatMap((pr) => windowsByTarget[pr.projectId] ?? [])))}
-                onCancelWindow={cancelWindow}
+                onCancelWindow={cancelWindow} roster={roster}
                 onSaved={() => { setTicked(new Set()); setReloads((n) => n + 1); }}
                 trigger={
                   <Button size="sm" variant="secondary" disabled={visibleTicked.length === 0}
@@ -710,6 +873,7 @@ export function PlanningPage() {
                   </TableHead>
                 )}
                 <TableHead>Application</TableHead>
+                <TableHead>Business unit</TableHead>
                 {/* The three facts a planner sizes an engagement from, beside the name rather than a
                     click away: the decision they inform is made while scanning the list. */}
                 <TableHead>Criticality</TableHead>
@@ -720,6 +884,7 @@ export function PlanningPage() {
                 <TableHead>Interval</TableHead>
                 <TableHead>Next due</TableHead>
                 <TableHead className="text-right">Planned</TableHead>
+                <TableHead>Planned by</TableHead>
                 <TableHead className="text-right">In flight</TableHead>
                 <TableHead className="text-right">Open requests</TableHead>
                 <TableHead className="text-right">Critical + high open</TableHead>
@@ -735,7 +900,7 @@ export function PlanningPage() {
                   .filter((w) => w.state !== "CANCELLED");
                 return (
                   <Fragment key={row.assetId}>
-                  <TableRow className={cn(selected === row.assetId && "bg-primary/5")}
+                  <TableRow className={cn(ROW_TINT[row.status], selected === row.assetId && "bg-primary/5")}
                             onMouseEnter={() => setSelected(row.assetId)}>
                     {data.mayPlan && (
                       <TableCell>
@@ -767,6 +932,15 @@ export function PlanningPage() {
                       {row.orgPath && (
                         <div className="pl-4.5 text-[11px] text-muted-foreground">{row.orgPath}</div>
                       )}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {row.businessUnitId ? (
+                        <button type="button" className="hover:text-primary hover:underline"
+                                title={`Show only ${row.businessUnitName}`}
+                                onClick={() => drillTo("unit", row.businessUnitId, row.businessUnitName ?? "")}>
+                          {row.businessUnitName}
+                        </button>
+                      ) : <span className="italic text-tone-unknown">—</span>}
                     </TableCell>
                     <TableCell>
                       {row.criticality
@@ -842,6 +1016,9 @@ export function PlanningPage() {
                         ? <span className="font-medium">{row.plannedWindows}</span>
                         : <span className="text-tone-unknown">none</span>}
                     </TableCell>
+                    <TableCell>
+                      <PlannedBy windows={windows} onDrill={drillTo} />
+                    </TableCell>
                     <TableCell className="tabular text-right">{row.inFlight || "—"}</TableCell>
                     <TableCell className="tabular text-right">{row.openRequests || "—"}</TableCell>
                     <TableCell className="tabular text-right">
@@ -861,7 +1038,7 @@ export function PlanningPage() {
                               // this row includes both and the dialog must not disagree with the
                               // number on the button that opened it.
                               existing={windows}
-                              onCancelWindow={cancelWindow}
+                              onCancelWindow={cancelWindow} roster={roster}
                               onSaved={() => setReloads((n) => n + 1)}
                               trigger={
                                 <Button size="sm" variant="ghost" title="Plan windows for the year">
@@ -952,7 +1129,7 @@ export function PlanningPage() {
                                                       intervalMonths: row.intervalMonths,
                                                       plannedWindows: pr.plannedWindows }]}
                                           existing={windowsByTarget[pr.projectId] ?? []}
-                                          onCancelWindow={cancelWindow}
+                                          onCancelWindow={cancelWindow} roster={roster}
                                           onSaved={() => setReloads((n) => n + 1)}
                                           trigger={
                                             <Button size="sm" variant="ghost"
@@ -1083,5 +1260,65 @@ export function PlanningPage() {
 
       <ReviewPolicy onChanged={() => setReloads((n) => n + 1)} />
     </div>
+  );
+}
+
+/**
+ * One headline figure. The tone repeats the status badge's colour; the label carries the meaning,
+ * so a monochrome print of the page still reads. A click applies the matching filter.
+ */
+function Kpi({ label, value, sub, tone, active, onClick }: {
+  label: string; value: number | string; sub?: string;
+  tone: "neutral" | "critical" | "high" | "ok" | "warn" | "unknown"; active?: boolean; onClick: () => void;
+}) {
+  const accent: Record<typeof tone, string> = {
+    neutral: "border-l-primary/60", critical: "border-l-sev-critical", high: "border-l-sev-high",
+    ok: "border-l-tone-ok", warn: "border-l-tone-warn", unknown: "border-l-tone-unknown",
+  };
+  const text: Record<typeof tone, string> = {
+    neutral: "", critical: "text-sev-critical", high: "text-sev-high", ok: "text-tone-ok",
+    warn: "text-tone-warn", unknown: "text-tone-unknown",
+  };
+  return (
+    <button type="button" onClick={onClick}
+            className={cn("flex flex-col items-start rounded-md border border-l-4 bg-card px-3 py-2 text-left transition-colors hover:bg-muted/50",
+              accent[tone], active && "ring-2 ring-primary/40")}>
+      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</span>
+      <span className={cn("tabular text-xl font-semibold leading-tight", text[tone])}>{value}</span>
+      {sub && <span className="text-[10px] text-muted-foreground">{sub}</span>}
+    </button>
+  );
+}
+
+/**
+ * Who the planned windows on a row are for: one chip per distinct team or person, clickable to
+ * narrow the page to them. A window with nobody named is said in words, because "planned" without
+ * an owner is the state a planner most needs to notice.
+ */
+function PlannedBy({ windows, onDrill }: { windows: PlanWindow[]; onDrill: (d: Dimension, id: string | null, label: string) => void }) {
+  const planned = windows.filter((w) => w.state === "PLANNED");
+  if (planned.length === 0) return <span className="text-xs text-tone-unknown">—</span>;
+  const teams = new Map<string, string>();
+  const people = new Map<string, string>();
+  let unowned = 0;
+  for (const w of planned) {
+    if (w.teamId) teams.set(w.teamId, w.teamName ?? "team");
+    if (w.assessorId) people.set(w.assessorId, w.assessorName ?? "person");
+    if (!w.teamId && !w.assessorId) unowned += 1;
+  }
+  return (
+    <span className="flex flex-wrap gap-1">
+      {[...teams].map(([id, name]) => (
+        <button key={id} type="button" onClick={() => onDrill("team", id, name)} title={`Show only ${name}`}>
+          <Badge tone="info">{name}</Badge>
+        </button>
+      ))}
+      {[...people].map(([id, name]) => (
+        <button key={id} type="button" onClick={() => onDrill("person", id, name)} title={`Show only ${name}`}>
+          <Badge tone="neutral">{name}</Badge>
+        </button>
+      ))}
+      {unowned > 0 && <Badge tone="warn">{unowned} without owner</Badge>}
+    </span>
   );
 }

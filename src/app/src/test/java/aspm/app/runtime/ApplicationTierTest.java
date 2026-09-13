@@ -358,7 +358,23 @@ class ApplicationTierTest {
             // 210: the application inventory export — one read. It calls the list handler rather
             // than querying again, so there is one definition of "the inventory" and the file and
             // the screen cannot disagree.
-            assertEquals(214, registry.all().size(), "registered: " + registry.all().size());
+            // 224: federated sign-in (V074) — two class G routes for the OIDC handshake, one read and
+            // seven class E writes for identity-provider administration under iam.idp.manage. The
+            // writes are the whole of the new authority: a provider decides who may sign in.
+            // 236: notification delivery (V075) — four class G routes for the caller's own centre and
+            // preferences, two class A reads and six class E writes for channels and routes under
+            // ntf.channel.manage.
+            // 248: outbound connectors (V076, DOC-21) — two class A reads and five class E writes for
+            // connector administration under int.connector.manage; one class A read of a finding's
+            // references under vul.finding.read; one class B write and one class A read plus two class B
+            // writes for references and divergences under int.reference.create.
+            // 257: scheduled reports and audit evidence (V077, DOC-12 §11–§12) — one class A read and five
+            // class E writes for schedules under rpt.schedule.manage; two class A reads of the caller's own
+            // artifacts; one class A export of audit evidence under rpt.evidence.export.
+            // 264: the AI surfaces of ADR-075 (V078) — two class B writes for ask and draft under
+            // aic.assist.use; two class A reads and three class E writes for usage, budget, evaluation and
+            // the provider probe under cfg.ai.manage.
+            assertEquals(264, registry.all().size(), "registered: " + registry.all().size());
         }
 
         @Test

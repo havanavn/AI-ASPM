@@ -245,6 +245,54 @@ public final class OverviewInsights {
                     RULES));
         }
 
+        // The commitment the organization made to itself, and whether it is being kept. A breach
+        // is not a severity: it is a promise with a date on it that has passed, which is why it is
+        // the sentence a board asks about before any score (PRD-CAP-009).
+        long breached = f.getOrDefault("sla_breached_open", 0L);
+        long dueSoon = f.getOrDefault("sla_due_7d", 0L);
+        if (breached > 0) {
+            out.add(new Observation("COMMITMENT_BREACHED", Level.ACT_NOW,
+                    plural(breached, "finding is", "findings are") + " past the remediation "
+                            + "commitment",
+                    "A service level was agreed for each of these and the clock has run out. "
+                            + (dueSoon > 0
+                                    ? plural(dueSoon, "more falls", "more fall") + " due within "
+                                            + "seven days. "
+                                    : "")
+                            + "This is measured against the organization's own promise, not against "
+                            + "a scale — which is what makes it the figure to report upward.",
+                    List.of(new Evidence("Past commitment", breached),
+                            new Evidence("Due within 7 days", dueSoon)),
+                    "/vulnerabilities", RULES));
+        }
+        // Accepted risk lapsing. An exception is a decision with an expiry; when it runs out the
+        // weakness is open again unless somebody fixed it or decided again (PRD-EXC-010).
+        long expiring = f.getOrDefault("exceptions_expiring_30d", 0L);
+        if (expiring > 0) {
+            out.add(new Observation("EXCEPTIONS_EXPIRING", Level.WATCH,
+                    plural(expiring, "accepted risk expires", "accepted risks expire") + " within "
+                            + "thirty days",
+                    "Each was accepted for a period by a named approver. Renewal is a decision, "
+                            + "not a default: when the period ends the weakness counts as open "
+                            + "unless it was fixed or the acceptance was taken again.",
+                    List.of(new Evidence("Expiring within 30 days", expiring),
+                            new Evidence("Active exceptions", f.getOrDefault("exceptions_active", 0L))),
+                    "/vulnerabilities", RULES));
+        }
+        // Owed and unplanned. The review interval says these applications are due; the plan has
+        // no window for them. This is where next quarter's overdue comes from (PRD-ASM-026).
+        long unplanned = f.getOrDefault("reviews_due_unplanned", 0L);
+        if (unplanned > 0) {
+            out.add(new Observation("REVIEWS_UNPLANNED", Level.WATCH,
+                    plural(unplanned, "application is", "applications are") + " owed a review "
+                            + "and nobody has planned one",
+                    "The review interval makes them due — overdue, never assessed, or due soon — "
+                            + "and no assessment window exists for them or anything under them. "
+                            + "Planning them is a capacity decision; leaving them is one too.",
+                    List.of(new Evidence("Owed and unplanned", unplanned),
+                            new Evidence("Owed in total", f.getOrDefault("reviews_due", 0L))),
+                    "/planning", RULES));
+        }
         // 7. Dependency blindness. Different from having no vulnerable dependencies.
         long noSbom = f.getOrDefault("assets_no_sbom", 0L);
         long assets = f.getOrDefault("assets_total", 0L);
@@ -285,6 +333,7 @@ public final class OverviewInsights {
      */
     public record Posture(String nodeId, String name, long applications, long neverAssessed,
             long openNow, long openBefore, long serious, long exposedSerious,
+            long breached, long reviewsDue, long reviewsUnplanned,
             String lastAssessedAt) {
 
         /** Whether this organization has anything the platform could measure at all. */
@@ -397,6 +446,28 @@ public final class OverviewInsights {
                                 + "                                      ORDER BY ordinal LIMIT 1) "
                                 + "      AND f.scope_node_id IN (SELECT descendant_id FROM sub "
                                 + "                               WHERE root_id = s.root_id)), "
+                                // Past the remediation commitment, owed reviews, and owed reviews
+                                // with no planned window — the three figures the executive strip
+                                // shows for the whole scope, per organization here.
+                                + "  (SELECT count(*) FROM service_level_clock k "
+                                + "     JOIN finding f ON f.id = k.subject_id AND k.subject_kind = 'FINDING' "
+                                + "    WHERE k.breached_at IS NOT NULL AND k.resolved_at IS NULL "
+                                + "      AND f.scope_node_id IN (SELECT descendant_id FROM sub "
+                                + "                               WHERE root_id = s.root_id)), "
+                                + "  (SELECT count(*) FROM application_review_cadence c JOIN asset a ON a.id = c.asset_id "
+                                + "    WHERE c.full_review_status IN ('OVERDUE', 'NEVER', 'DUE_SOON') "
+                                + "      AND a.lifecycle_state <> 'RETIRED' "
+                                + "      AND a.owning_node_id IN (SELECT descendant_id FROM sub "
+                                + "                                WHERE root_id = s.root_id)), "
+                                + "  (SELECT count(*) FROM application_review_cadence c JOIN asset a ON a.id = c.asset_id "
+                                + "    WHERE c.full_review_status IN ('OVERDUE', 'NEVER', 'DUE_SOON') "
+                                + "      AND a.lifecycle_state <> 'RETIRED' "
+                                + "      AND a.owning_node_id IN (SELECT descendant_id FROM sub "
+                                + "                                WHERE root_id = s.root_id) "
+                                + "      AND NOT EXISTS (SELECT 1 FROM assessment_plan_window w "
+                                + "           WHERE w.state = 'PLANNED' AND w.ends_on >= current_date "
+                                + "             AND (w.target_asset_id = a.id OR w.target_asset_id IN "
+                                + "                  (SELECT cc.asset_id FROM asset_composition cc WHERE cc.root_id = a.id)))), "
                                 + "  (SELECT to_char(max(r.created_at), 'YYYY-MM-DD') "
                                 + "     FROM assessment_request r "
                                 + "    WHERE r.requested_org_node_id IN (SELECT descendant_id FROM sub "
@@ -407,7 +478,8 @@ public final class OverviewInsights {
                 while (r.next()) {
                     rows.add(new Posture(r.getString(1), r.getString(2), r.getLong(3), r.getLong(4),
                             r.getLong(5), r.getLong(6), r.getLong(7), r.getLong(8),
-                            r.getString(9)));
+                            r.getLong(9), r.getLong(10), r.getLong(11),
+                            r.getString(12)));
                 }
             }
         }
@@ -427,6 +499,16 @@ public final class OverviewInsights {
      * is the direct link and is populated only by the ingestion pipeline, so relying on it alone
      * would make every rule silent for manually recorded work — which is most of it.
      */
+    /**
+     * The same figures the rules read, for a caller that wants to show them rather than the
+     * sentences — the executive strip on the overview. One statement, so the strip and the
+     * observations beneath it cannot disagree about a number (PRD-ASM-024).
+     */
+    public Map<String, Long> figures(Principal principal) throws SQLException {
+        Set<UUID> scope = principal == null ? Set.of() : principal.scopeNodeIds();
+        return scope.isEmpty() ? Map.of() : facts(principal);
+    }
+
     private Map<String, Long> facts(Principal principal) throws SQLException {
         Map<String, Long> out = new LinkedHashMap<>();
         String inScope = "IN (SELECT descendant_id FROM org_closure WHERE ancestor_id = ANY (?))";
@@ -495,7 +577,44 @@ public final class OverviewInsights {
                                 + "     AND a.owning_node_id " + inScope
                                 + "     AND NOT EXISTS (SELECT 1 FROM sbom_coverage_state c "
                                 + "          WHERE c.asset_id = a.id "
-                                + "            AND c.latest_snapshot_at IS NOT NULL)) AS assets_no_sbom")) {
+                                + "            AND c.latest_snapshot_at IS NOT NULL)) AS assets_no_sbom, "
+                                // The commitment the organization set for itself (PRD-CAP-009). A
+                                // breach is the figure a board asks about first, because it is the one
+                                // measured against a promise rather than against a scale.
+                                + " (SELECT count(*) FROM service_level_clock k "
+                                + "   JOIN finding f ON f.id = k.subject_id AND k.subject_kind = 'FINDING' "
+                                + "   WHERE k.breached_at IS NOT NULL AND k.resolved_at IS NULL "
+                                + "     AND f.scope_node_id " + inScope + ") AS sla_breached_open, "
+                                + " (SELECT count(*) FROM service_level_clock k "
+                                + "   JOIN finding f ON f.id = k.subject_id AND k.subject_kind = 'FINDING' "
+                                + "   WHERE k.resolved_at IS NULL AND k.breached_at IS NULL "
+                                + "     AND k.due_at < now() + interval '7 days' "
+                                + "     AND f.scope_node_id " + inScope + ") AS sla_due_7d, "
+                                // Accepted risk is a decision with an expiry (PRD-EXC-010). An
+                                // exception about to lapse is a decision that has to be taken again.
+                                + " (SELECT count(*) FROM risk_exception x WHERE x.state = 'ACTIVE' "
+                                + "     AND x.scope_node_id " + inScope + ") AS exceptions_active, "
+                                + " (SELECT count(*) FROM risk_exception x WHERE x.state = 'ACTIVE' "
+                                + "     AND x.expires_at < now() + interval '30 days' "
+                                + "     AND x.scope_node_id " + inScope + ") AS exceptions_expiring_30d, "
+                                // Owed by the review interval; unplanned means no window in the plan
+                                // for the application or anything under it (PRD-ASM-026).
+                                + " (SELECT count(*) FROM application_review_cadence c "
+                                + "   JOIN asset a ON a.id = c.asset_id "
+                                + "   WHERE c.full_review_status IN ('OVERDUE', 'NEVER', 'DUE_SOON') "
+                                + "     AND a.lifecycle_state <> 'RETIRED' "
+                                + "     AND a.owning_node_id " + inScope + ") AS reviews_due, "
+                                + " (SELECT count(*) FROM application_review_cadence c "
+                                + "   JOIN asset a ON a.id = c.asset_id "
+                                + "   WHERE c.full_review_status IN ('OVERDUE', 'NEVER', 'DUE_SOON') "
+                                + "     AND a.lifecycle_state <> 'RETIRED' "
+                                + "     AND a.owning_node_id " + inScope
+                                + "     AND NOT EXISTS (SELECT 1 FROM assessment_plan_window w "
+                                + "          WHERE w.state = 'PLANNED' AND w.ends_on >= current_date "
+                                + "            AND (w.target_asset_id = a.id "
+                                + "                 OR w.target_asset_id IN (SELECT cc.asset_id "
+                                + "                      FROM asset_composition cc WHERE cc.root_id = a.id)))) "
+                                + "     AS reviews_due_unplanned")) {
             // Every placeholder in this statement is the same scope array, and the COUNT comes from
             // the driver rather than from me. Hand-counting it was wrong three times across this
             // codebase — off by one here, off by one in two of the analytics queries — and each was

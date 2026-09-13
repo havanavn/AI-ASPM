@@ -112,7 +112,7 @@ public final class SbomIngestion {
      * its advisory data frozen, and a CVE published after its last push was invisible for ever. That
      * is the false negative this product exists to prevent, and it needs the original bytes.
      */
-    private final ObjectStore objects = new ObjectStore(System.getenv());
+    private final ObjectStore objects = ObjectStore.fromDeployment();
 
     public SbomIngestion(DataSource dataSource) {
         this.dataSource = Objects.requireNonNull(dataSource, "a data source is required");
