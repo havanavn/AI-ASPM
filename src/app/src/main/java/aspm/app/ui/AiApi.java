@@ -1,6 +1,7 @@
 package aspm.app.ui;
 
 import aspm.app.ai.Assistant;
+import aspm.app.ai.Copilot;
 import aspm.app.ai.Invocations;
 import aspm.app.ai.ModelClient;
 import aspm.app.ai.ModelEvaluation;
@@ -25,6 +26,7 @@ import javax.sql.DataSource;
 public final class AiApi {
 
     private final Assistant assistant;
+    private final Copilot copilot;
     private final Invocations invocations;
     private final AiProviderService providers;
     private final ModelEvaluation evaluation;
@@ -32,6 +34,7 @@ public final class AiApi {
     public AiApi(DataSource dataSource) {
         Objects.requireNonNull(dataSource);
         this.assistant = new Assistant(dataSource);
+        this.copilot = new Copilot(dataSource);
         this.invocations = new Invocations(dataSource);
         this.providers = new AiProviderService(dataSource);
         this.evaluation = new ModelEvaluation(dataSource);
@@ -75,6 +78,99 @@ public final class AiApi {
             m.put("detail", r.detail());
         }
         return Dispatcher.Response.ok(m);
+    }
+
+    // ==============================================================================================
+    // The copilot (PRD-AIC-058, ADR-077)
+    // ==============================================================================================
+
+    /**
+     * {@code GET /api/ui/ai/copilot}. The panel's opening state: this person's conversations, the
+     * starter questions their permissions make answerable, and which packs they may read.
+     */
+    public Dispatcher.Response copilotOpen(Dispatcher.Request request) throws SQLException {
+        Principal principal = request.principal();
+        List<Map<String, Object>> conversations = new ArrayList<>();
+        for (Copilot.Conversation v : copilot.conversations(principal, 20)) {
+            conversations.add(conversation(v));
+        }
+        List<Map<String, Object>> starters = new ArrayList<>();
+        for (Copilot.Starter starter : copilot.starters(principal)) {
+            starters.add(Map.of("text", starter.text(), "pack", starter.pack()));
+        }
+        // What it can and cannot look at, stated before anybody asks. A copilot that refuses part of a
+        // question is easier to trust when it said in advance which part it would refuse (PRD-AIC-048).
+        List<Map<String, Object>> packs = new ArrayList<>();
+        for (Copilot.Pack pack : Copilot.PACKS) {
+            boolean readable = pack.permission().isEmpty() || principal.holds(pack.permission());
+            packs.add(Map.of("code", pack.code(), "label", pack.label(),
+                    "permission", pack.permission().isEmpty() ? "none" : pack.permission(),
+                    "readable", Boolean.valueOf(readable)));
+        }
+        return Dispatcher.Response.ok(Map.of("conversations", conversations, "starters", starters, "packs", packs,
+                "individualWorkload", Boolean.valueOf(principal.holds(Copilot.WORKLOAD_INDIVIDUAL))));
+    }
+
+    /** {@code GET /api/ui/ai/copilot/{id}}. One conversation, replayed. Empty where it is not this person's. */
+    public Dispatcher.Response copilotConversation(Dispatcher.Request request) throws SQLException {
+        UUID id = pathId(request);
+        List<Map<String, Object>> messages = new ArrayList<>();
+        for (Copilot.Message m : copilot.messages(request.principal(), id)) {
+            messages.add(message(m));
+        }
+        return Dispatcher.Response.ok(Map.of("id", id.toString(), "messages", messages));
+    }
+
+    /** {@code POST /api/ui/ai/copilot} with {@code {question, conversationId?}}. */
+    public Dispatcher.Response copilotAsk(Dispatcher.Request request) throws SQLException {
+        Map<String, Object> body = request.body().orElse(Map.of());
+        Copilot.Turn turn = copilot.ask(request.principal(), uuid(body, "conversationId"),
+                text(body, "question").orElse(""));
+        return Dispatcher.Response.ok(Map.of("conversation", conversation(turn.conversation()),
+                "answer", message(turn.answer()), "followUps", turn.followUps()));
+    }
+
+    /** {@code POST /api/ui/ai/copilot/{id}/clear}. Drops it from the person's list; the rows stay (V081). */
+    public Dispatcher.Response copilotClear(Dispatcher.Request request) throws SQLException {
+        return Dispatcher.Response.ok(Map.of("cleared",
+                Boolean.valueOf(copilot.clear(request.principal(), pathId(request)))));
+    }
+
+    private static Map<String, Object> conversation(Copilot.Conversation v) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", v.id());
+        m.put("title", v.title());
+        m.put("updatedAt", v.updatedAt());
+        m.put("messages", Integer.valueOf(v.messages()));
+        m.put("focusAssetId", v.focusAssetId());
+        m.put("focusAssetName", v.focusAssetName());
+        return m;
+    }
+
+    private static Map<String, Object> message(Copilot.Message message) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", message.id());
+        m.put("role", message.role());
+        m.put("text", message.text());
+        m.put("citations", message.citations());
+        m.put("facts", facts(message.facts()));
+        m.put("topics", message.topics());
+        m.put("withheld", message.withheld());
+        m.put("modelIdentity", message.modelIdentity());
+        m.put("createdAt", message.generatedAt());
+        m.put("refused", message.refusalCode());
+        // PRD-AIC-036: whether a model wrote this, in every representation. The rules path is not
+        // generated content and must not wear the label.
+        m.put("generated", Boolean.valueOf(message.generated()));
+        return m;
+    }
+
+    private static UUID pathId(Dispatcher.Request request) {
+        try {
+            return UUID.fromString(request.pathVariables().get("id"));
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException("the identifier is not a UUID");
+        }
     }
 
     /** {@code GET /api/ui/ai/usage?days=30}. */

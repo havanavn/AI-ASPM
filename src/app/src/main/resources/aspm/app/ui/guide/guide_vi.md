@@ -372,6 +372,29 @@ Nút **Phân tích** trên các bảng điều khiển yêu cầu một năng l�
 Việc yêu cầu được kiểm soát bằng quyền hành động trên kết quả, không phải bằng quyền quản trị đã bật
 năng lực đó.
 
+### Copilot
+
+Biểu tượng ở góc dưới bên phải mọi màn hình mở ra một cuộc trò chuyện về tình trạng an toàn trong phạm
+vi bạn nhìn thấy. Nó lấy đúng những con số câu hỏi cần, trích dẫn mỗi khẳng định về con số làm cơ sở,
+và nói rõ phần nào của câu hỏi nó không được phép xem thay vì trả lời một câu hẹp hơn như thể đó là
+câu bạn đã hỏi.
+
+Nó đọc hai loại nguồn. Dữ liệu của bạn — phát hiện, ứng dụng, cam kết khắc phục, yêu cầu đánh giá, kế
+hoạch, danh sách nhân sự nếu bạn được đọc — luôn trong phạm vi của bạn và không bao giờ là một bản ghi
+mà tự bạn không mở được. Và tài liệu này cùng tài liệu API, đó là cách nó trả lời "làm thế nào để làm
+X" và "gọi API thế nào". Các endpoint nó nêu được đọc từ bảng thao tác đang chạy, nên nó không thể bịa
+ra một endpoint không tồn tại.
+
+Nó không có đường ghi. Khi câu trả lời gợi ý một hành động, liên kết sẽ dẫn tới màn hình nơi bạn thực
+hiện hành động đó.
+
+**Ai được dùng là một quyết định riêng.** Copilot được kiểm soát bằng quyền riêng của nó,
+`aic.copilot.use`, tách khỏi quyền kiểm soát các nút soạn thảo và ô hỏi một câu. Hai thứ có tầm với
+khác nhau: nút soạn thảo giúp bạn với bản ghi đang mở, còn copilot với tới mọi thứ bạn nhìn thấy được.
+Nhờ vậy một tổ chức có thể cho các vai trò kỹ thuật dùng trợ giúp soạn thảo mà không mở cho họ một cửa
+sổ hội thoại lên toàn bộ hiện trạng — hoặc cấp copilot cho đúng một người trong nhóm. Xem mục 14 để
+biết cách làm.
+
 ## 14. Truy cập và vai trò
 
 Hai màn hình, cố ý tách riêng, vì "ai được dùng nền tảng" và "một vai trò nghĩa là gì" là hai công
@@ -424,6 +447,25 @@ Vài điều đáng biết trước khi soạn một vai trò:
 không cho dùng lại, bật hay tắt kiểm tra mật khẩu đã lộ, thời hạn phiên, và yếu tố thứ hai có bắt buộc
 với mọi người hay không. Màn hình này cũng báo kích thước kho mật khẩu đã lộ đang nạp, để một kho quá
 mỏng hiện ra rõ ràng thay vì trông như một phép kiểm tra đang hoạt động.
+
+### Cấp một năng lực cho đúng một người
+
+Một vai trò có thể chỉ chứa một quyền. Đó chính là cơ chế cho "người này, trong quý này, trên đơn vị
+này" — và là câu trả lời mỗi khi một năng lực phù hợp với một thành viên chứ không phải cả nhóm.
+
+Tạo một vai trò chỉ chứa một quyền, đặt tên theo thứ nó cấp chứ không theo người sẽ giữ, rồi cấp cho
+người đó trên đúng phạm vi bạn muốn. Một lần cấp có thể kèm thời hạn, nên một sắp xếp tạm thời sẽ tự
+hết hiệu lực mà không ai phải nhớ.
+
+Ví dụ cụ thể, cấp AI copilot cho một kỹ sư:
+
+1. **Vai trò** → tạo vai trò mới → đặt tên `AI copilot` → thêm quyền `aic.copilot.use` → lưu.
+2. **Truy cập** → mở người đó → cấp quyền → vai trò `AI copilot`, phạm vi **Cây con** trên đơn vị của
+   họ, kèm thời hạn nếu đây là sắp xếp tạm thời.
+
+Nếu muốn thu hồi copilot khỏi cả một vai trò, hãy mở vai trò đó và bỏ quyền `aic.copilot.use` ra. Các
+nút soạn thảo và ô hỏi một câu của họ vẫn hoạt động: chúng được kiểm soát bằng `aic.assist.use`, là
+một quyền khác.
 
 ## 15. Khi một thao tác bị từ chối
 

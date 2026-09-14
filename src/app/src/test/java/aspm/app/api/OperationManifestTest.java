@@ -79,7 +79,7 @@ class OperationManifestTest {
                 // The product mark. PRD-UIX-006 is the single design language it belongs to, and
                 // INT-UIX-004 the accessibility floor its alt text and contrast answer to. One file
                 // behind two URLs, so the two interfaces cannot show different logos.
-                case "/brand/logo.svg", "/brand/icon-180.png" ->
+                case "/brand/icon.png", "/brand/logo.png", "/brand/logo-dark.png", "/brand/copilot.png", "/brand/icon-180.png" ->
                         List.of("PRD-UIX-006", "INT-UIX-004");
                 case "/app.js" -> List.of("PRD-UIX-013", "INT-UIX-003");
                 // ADR-059's authentication surfaces. Each traces to the requirement that shapes it:
@@ -124,6 +124,13 @@ class OperationManifestTest {
                         List.of("PRD-DSH-046", "PRD-DSH-047", "PRD-DSH-048");
                 case "/api/ui/ai/ask" -> List.of("PRD-AIC-057", "PRD-AIC-030", "PRD-AIC-033", "PRD-AIC-034", "PRD-AIC-036");
                 case "/api/ui/ai/draft" -> List.of("PRD-AIC-019", "PRD-AIC-036");
+                // The copilot. PRD-AIC-058 is the conversation itself; the rest are the properties it
+                // inherits from the single-shot surface and must not lose by becoming a conversation —
+                // the scope the facts come from, citations that resolve, no figure the platform did not
+                // retrieve, the generated label, and an unavailable part named rather than answered around.
+                case "/api/ui/ai/copilot", "/api/ui/ai/copilot/{id}", "/api/ui/ai/copilot/{id}/clear" ->
+                        List.of("PRD-AIC-058", "PRD-AIC-030", "PRD-AIC-033", "PRD-AIC-034", "PRD-AIC-036",
+                                "PRD-AIC-037", "PRD-AIC-048");
                 case "/api/ui/ai/usage", "/api/ui/ai/budget" -> List.of("PRD-AIC-043", "PRD-AIC-044", "PRD-AIC-053", "PRD-AIC-054");
                 case "/api/ui/ai/evaluate", "/api/ui/ai/evaluations" -> List.of("PRD-AIC-049", "PRD-AIC-050");
                 case "/api/ui/ai-providers/{id}/test" -> List.of("PRD-AIC-023", "PRD-AIC-026");

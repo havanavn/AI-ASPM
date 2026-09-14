@@ -109,7 +109,7 @@ public final class GuidePage {
      * one is opened by somebody who cannot find a number, the other by somebody wiring a pipeline. A
      * guide that serves both serves neither, and the API half is the half that gets skimmed past.
      */
-    static String loadApi(Locale locale) {
+    public static String loadApi(Locale locale) {
         String language = locale == null ? "" : locale.getLanguage().toLowerCase(Locale.ROOT);
         String chosen = TRANSLATED.contains(language) ? language : "en";
         String content = read(RESOURCE_ROOT + "api_" + chosen + ".md");
@@ -125,7 +125,7 @@ public final class GuidePage {
      * deliberately: {@link Messages} pseudo-localizes patterns from the source bundle, and pseudo-
      * localizing a whole document would test nothing this page owns while making it unreadable.
      */
-    static String load(Locale locale) {
+    public static String load(Locale locale) {
         String language = locale == null ? "" : locale.getLanguage().toLowerCase(Locale.ROOT);
         String chosen = TRANSLATED.contains(language) ? language : "en";
         String content = read(RESOURCE_ROOT + "guide_" + chosen + ".md");

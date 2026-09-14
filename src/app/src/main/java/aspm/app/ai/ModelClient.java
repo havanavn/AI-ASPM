@@ -38,7 +38,17 @@ public interface ModelClient {
     }
 
     /** What came back: the text, and what the provider says it cost. */
-    record Completion(String text, int promptTokens, int completionTokens, String modelReported) {
+    /**
+     * @param truncated the provider says it stopped because it ran out of room, not because it finished.
+     *     Authoritative, where a heuristic over the text is not: an answer that ends on a name rather
+     *     than a full stop is usually finished, and one the provider cut is never finished
+     */
+    record Completion(String text, int promptTokens, int completionTokens, String modelReported,
+            boolean truncated) {
+
+        public Completion(String text, int promptTokens, int completionTokens, String modelReported) {
+            this(text, promptTokens, completionTokens, modelReported, false);
+        }
     }
 
     /** A call that did not produce a completion, classified for the caller and the invocation record. */
@@ -337,7 +347,8 @@ public interface ModelClient {
                         : "the provider returned nothing usable");
             }
             Map<?, ?> usage = root.get("usage") instanceof Map<?, ?> u ? u : Map.of();
-            return new Completion(content, intOf(usage.get("prompt_tokens")), intOf(usage.get("completion_tokens")), text(root.get("model")));
+            return new Completion(content, intOf(usage.get("prompt_tokens")), intOf(usage.get("completion_tokens")),
+                    text(root.get("model")), "length".equals(text(first.get("finish_reason"))));
         }
     }
 
@@ -382,7 +393,8 @@ public interface ModelClient {
                 throw new ModelException("EMPTY_REPLY", "the provider returned nothing usable");
             }
             Map<?, ?> usage = root.get("usage") instanceof Map<?, ?> u ? u : Map.of();
-            return new Completion(content.toString(), intOf(usage.get("input_tokens")), intOf(usage.get("output_tokens")), text(root.get("model")));
+            return new Completion(content.toString(), intOf(usage.get("input_tokens")), intOf(usage.get("output_tokens")),
+                    text(root.get("model")), "max_tokens".equals(text(root.get("stop_reason"))));
         }
     }
 

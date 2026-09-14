@@ -59,13 +59,14 @@ public final class AuthLayout {
             <main class="auth-main" id="main">
               <div class="auth-panel">
                 <div class="auth-brand">
-                  <!-- The product's own mark, served from /brand/logo.svg — the same file and the same
-                       <img> the application's sidebar uses. It was a CSS square with the letter "A" in
-                       it, which is a placeholder wearing the confidence of a logo, and it meant the
-                       first screen anybody sees was the one screen not carrying the brand. -->
-                  <img class="auth-logo" src="/brand/logo.svg" alt="" aria-hidden="true"
-                       width="28" height="28">
-                  <span>%s</span>
+                  <!-- The product's wordmark, served from /brand/logo.png — the same file the
+                       application's sidebar head uses. The name is in the image, so the text beside it
+                       is kept for screen readers and hidden from sight rather than printed twice. -->
+                  <img class="auth-logo auth-logo-light" src="/brand/logo.png" alt="" aria-hidden="true"
+                       width="168" height="56">
+                  <img class="auth-logo auth-logo-dark" src="/brand/logo-dark.png" alt="" aria-hidden="true"
+                       width="168" height="56">
+                  <span class="visually-hidden">%s</span>
                 </div>
                 %s
               </div>

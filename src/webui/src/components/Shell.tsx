@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Logo } from "@/components/Logo";
 import { NotificationBell } from "@/components/NotificationBell";
+import { Copilot } from "@/components/Copilot";
 import { startKeepalive, extendNow } from "@/lib/keepalive";
 import type { Session } from "@/lib/types";
 
@@ -73,8 +74,7 @@ export function Shell({ session }: { session: Session }) {
           {/* The product's own mark, not a stock shield. ShieldCheck is still used in the nav to
               mean "software composition", and having the same glyph stand for both the product and
               one of its sections made the brand read as a section. */}
-          <Logo className="size-6" />
-          <span className="text-sm font-semibold tracking-tight">AI ASPM</span>
+          <Logo variant="wordmark" className="h-8 w-auto" />
         </div>
         <Separator />
         <nav className="flex flex-1 flex-col gap-0.5 p-2">
@@ -136,6 +136,10 @@ export function Shell({ session }: { session: Session }) {
         </header>
         <main className="min-w-0 flex-1 p-5"><Outlet /></main>
       </div>
+      {/* Mounted on the SHELL, not on a page: it is behind sign-in on every route and its thread
+          survives navigation, which is the whole point of asking a follow-up after clicking through
+          to the list the previous answer cited. */}
+      <Copilot permitted={session.permissions.includes("aic.copilot.use")} />
     </div>
   );
 }

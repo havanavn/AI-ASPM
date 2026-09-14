@@ -73,9 +73,15 @@ public final class ModelNarrator {
      * learns that somebody is writing instructions into its findings. {@link #injectionSignals} is
      * public for the caller to use on the content it is about to ground a suggestion in.
      */
-    public record Narration(String text, String modelIdentity, String promptVersion, java.util.UUID invocationId) {
+    public record Narration(String text, String modelIdentity, String promptVersion, java.util.UUID invocationId,
+            boolean truncated) {
+
+        public Narration(String text, String modelIdentity, String promptVersion, java.util.UUID invocationId) {
+            this(text, modelIdentity, promptVersion, invocationId, false);
+        }
+
         public Narration(String text, String modelIdentity, String promptVersion) {
-            this(text, modelIdentity, promptVersion, null);
+            this(text, modelIdentity, promptVersion, null, false);
         }
     }
 
@@ -143,7 +149,12 @@ public final class ModelNarrator {
             // notes for a draft. Not record content — the person typing them is the person authorized —
             // but text a model reads is text that goes through the fence, whoever wrote it.
             "user_question",
-            "draft_notes");
+            "draft_notes",
+            // The copilot's stored transcript (ADR-077). It is the platform's own row and it is still
+            // fenced: an earlier ASSISTANT turn was written by a model over facts that may have carried
+            // an attacker-authored finding title, so the text can arrive here carrying an instruction
+            // that survived one round trip. A field that is "ours" is not a field that is safe.
+            "conversation_history");
 
     /**
      * The fields that are record CONTENT, and so need the RECORD category and the tenant's consent.
@@ -183,6 +194,24 @@ public final class ModelNarrator {
             Pattern.compile("describe (this|it|them|the [a-z ]{1,20})? ?as\\b", Pattern.CASE_INSENSITIVE),
             Pattern.compile("(assistant|model|ai) instruction", Pattern.CASE_INSENSITIVE),
             Pattern.compile("when (summarising|summarizing|reporting|writing)",
+                    Pattern.CASE_INSENSITIVE),
+            // Three more the corpus caught when the copilot's two fields were written against
+            // (ADR-077, TST-AIC-002), and the patterns above did not. Each is a family, not a phrase:
+            //
+            //   * "ignore the FACTS" — the first two patterns require the words previous/prior/above,
+            //     so an instruction aimed at the grounding itself rather than at the system message
+            //     walked past them. That is the more dangerous of the two aims.
+            //   * "repeat the full system instructions" — the third pattern wants "system:" or
+            //     "system prompt", and an exfiltration attempt that says "system instructions" is the
+            //     same attack spelled the way a person would spell it.
+            //   * "omit anything about the payment service" — "do not mention" was covered; the verb
+            //     that means the same thing and reads as an editorial note was not.
+            Pattern.compile("(ignore|disregard|forget)\\s+(all |any |the |your )?"
+                    + "(previous|prior|above|facts?|rules?|instructions?|constraints?|context)",
+                    Pattern.CASE_INSENSITIVE),
+            Pattern.compile("\\b(system|developer|capability)\\s+(instruction|message|rule)s?\\b",
+                    Pattern.CASE_INSENSITIVE),
+            Pattern.compile("\\b(omit|suppress|exclude|leave out)\\s+(anything|everything|all|any|the|mention)",
                     Pattern.CASE_INSENSITIVE));
 
     /**
@@ -202,7 +231,14 @@ public final class ModelNarrator {
     private final boolean bypassCache;
 
     /** A structured answer: the parsed JSON object, with what produced it. */
-    public record Structured(Map<String, Object> json, String modelIdentity, String promptVersion, java.util.UUID invocationId) {
+    /** @param truncated the provider stopped for want of room; the text is a fragment however it reads */
+    public record Structured(Map<String, Object> json, String modelIdentity, String promptVersion,
+            java.util.UUID invocationId, boolean truncated) {
+
+        public Structured(Map<String, Object> json, String modelIdentity, String promptVersion,
+                java.util.UUID invocationId) {
+            this(json, modelIdentity, promptVersion, invocationId, false);
+        }
     }
 
     public ModelNarrator(DataSource dataSource) {
@@ -316,7 +352,8 @@ public final class ModelNarrator {
             reject(principal, written.invocationId(), "NOT_AN_OBJECT");
             return new Refusal("NOT_AN_OBJECT", "the reply was not the JSON object that was asked for (PRD-AIC-032)");
         }
-        return new Structured(json, written.modelIdentity(), written.promptVersion(), written.invocationId());
+        return new Structured(json, written.modelIdentity(), written.promptVersion(), written.invocationId(),
+                written.truncated());
     }
 
     /** A JSON object out of a reply that may wrap it in a code fence or prose; null when there is none. */
@@ -472,7 +509,7 @@ public final class ModelNarrator {
             if (!usable) {
                 return new Refusal("EMPTY_REPLY", "the provider returned nothing usable");
             }
-            return new Narration(reply, identity, promptVersion, invocationId);
+            return new Narration(reply, identity, promptVersion, invocationId, completion.truncated());
         }
     }
 

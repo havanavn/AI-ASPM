@@ -111,19 +111,44 @@ public final class Assistant {
             narrator.reject(principal, structured.invocationId(), "EMPTY_ANSWER");
             return new Refused("EMPTY_ANSWER", "the model produced no answer", facts);
         }
-        // PRD-AIC-033: every citation resolves, and every posture claim carries one.
+        List<String> citations = new ArrayList<>();
+        Optional<Refused> rejected = rejection(narrator, principal, structured, answer, facts, factLines, question,
+                insufficient, citations);
+        if (rejected.isPresent()) {
+            return rejected.get();
+        }
+        return new Answer(answer, citations, facts, insufficient, structured.modelIdentity(), structured.promptVersion(), true);
+    }
+
+    /**
+     * The four controls that decide whether a generated answer may be shown, in one place.
+     *
+     * <p>Every citation resolves to a fact that was given ({@code PRD-AIC-033}); an answer that claims
+     * something about the posture and cites nothing cannot be checked, so it is refused too; a figure
+     * that is not in the facts is the failure ADR-038 exists to prevent; and a severity the record does
+     * not carry is {@code PRD-AIC-035}. A failure rejects the whole answer and marks the invocation
+     * refused — it is never repaired, because a repaired answer is one nobody reviewed.
+     *
+     * <p>Shared by {@link #ask} and by the copilot rather than copied into each. A security control with
+     * two implementations has one that is weaker, and nothing says which.
+     *
+     * @param citationsOut filled with the citations found, in the order they appear
+     * @return the refusal where a control tripped, empty where the answer may be shown
+     */
+    static Optional<Refused> rejection(ModelNarrator narrator, Principal principal, ModelNarrator.Structured structured,
+            String answer, List<Fact> facts, List<String> factLines, String question, boolean insufficient,
+            List<String> citationsOut) throws SQLException {
         Set<String> known = new java.util.HashSet<>();
         facts.forEach(f -> known.add(f.ref()));
-        List<String> citations = new ArrayList<>();
         java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\[(F\\d+)\\]").matcher(answer);
         while (m.find()) {
             if (!known.contains(m.group(1))) {
                 narrator.reject(principal, structured.invocationId(), "UNRESOLVED_CITATION");
-                return new Refused("UNRESOLVED_CITATION", "the answer cited " + m.group(1) + ", which is not among the facts it was given "
-                        + "(PRD-AIC-033); it was rejected rather than repaired", facts);
+                return Optional.of(new Refused("UNRESOLVED_CITATION", "the answer cited " + m.group(1)
+                        + ", which is not among the facts it was given (PRD-AIC-033); it was rejected rather than repaired", facts));
             }
-            if (!citations.contains(m.group(1))) {
-                citations.add(m.group(1));
+            if (!citationsOut.contains(m.group(1))) {
+                citationsOut.add(m.group(1));
             }
         }
         if (structured.json().get("citations") instanceof List<?> declared) {
@@ -131,29 +156,58 @@ public final class Assistant {
                 String ref = String.valueOf(c);
                 if (!known.contains(ref)) {
                     narrator.reject(principal, structured.invocationId(), "UNRESOLVED_CITATION");
-                    return new Refused("UNRESOLVED_CITATION", "the answer cited " + ref + ", which is not among the facts it was given (PRD-AIC-033)", facts);
+                    return Optional.of(new Refused("UNRESOLVED_CITATION", "the answer cited " + ref
+                            + ", which is not among the facts it was given (PRD-AIC-033)", facts));
                 }
-                if (!citations.contains(ref)) {
-                    citations.add(ref);
+                if (!citationsOut.contains(ref)) {
+                    citationsOut.add(ref);
                 }
             }
         }
-        if (citations.isEmpty() && !insufficient) {
+        if (citationsOut.isEmpty() && !insufficient) {
             narrator.reject(principal, structured.invocationId(), "UNCITED_ANSWER");
-            return new Refused("UNCITED_ANSWER", "the answer cited nothing, so no claim in it can be checked (PRD-AIC-033)", facts);
+            return Optional.of(new Refused("UNCITED_ANSWER",
+                    "the answer cited nothing, so no claim in it can be checked (PRD-AIC-033)", facts));
         }
-        // PRD-AIC-034: a figure not in the facts. Citation markers are not figures.
         String invented = ModelNarrator.inventedFigure(answer.replaceAll("\\[F\\d+\\]", ""), factLines, question);
         if (invented != null) {
             narrator.reject(principal, structured.invocationId(), "INVENTED_NUMBER");
-            return new Refused("INVENTED_NUMBER", "the answer contained the figure " + invented + ", which is not among the facts (ADR-038)", facts);
+            return Optional.of(new Refused("INVENTED_NUMBER", "the answer contained the figure " + invented
+                    + ", which is not among the facts (ADR-038)", facts));
+        }
+        // Stopped mid-clause. Added 2026-09-13 after a live answer read, in full, "Dựa trên kế hoạch
+        // hiện tại, bạn nên đánh giá bảo mật ứng dụng" — "based on the current plan you should assess
+        // application" — and was shown as though it were the answer. It cited a fact, invented no
+        // figure and contradicted nothing, so every control passed; what it did not do is finish the
+        // sentence, and the word it stopped before was the one the reader had asked for.
+        //
+        // TWO SIGNALS, and the first is the one that matters. The provider says whether it stopped
+        // because it ran out of room; that is authoritative and has no false positives. The first
+        // version of this control used only the second signal — a last character that is a letter or a
+        // digit — and rejected an 809-token answer to "what security risk do our products carry" that
+        // merely ended on an organization's name. So the text heuristic now applies only to answers
+        // short enough that a missing full stop cannot be a style: a fragment, not a paragraph.
+        String trimmed = answer.stripTrailing();
+        boolean unfinishedFragment = trimmed.length() < 80 && !trimmed.isEmpty()
+                && Character.isLetterOrDigit(trimmed.charAt(trimmed.length() - 1));
+        if (structured.truncated() || unfinishedFragment) {
+            narrator.reject(principal, structured.invocationId(), "INCOMPLETE_ANSWER");
+            return Optional.of(new Refused("INCOMPLETE_ANSWER",
+                    structured.truncated()
+                            ? "the provider stopped generating for want of room, so the answer is a fragment however "
+                                    + "complete it reads; it was rejected rather than shown"
+                            : "the answer stopped mid-sentence — it ended on \""
+                                    + trimmed.substring(Math.max(0, trimmed.length() - 40)) + "\" — so it was "
+                                    + "rejected rather than shown as though it were complete",
+                    facts));
         }
         String contradiction = ModelNarrator.contradictedSeverity(answer, factLines);
         if (contradiction != null) {
             narrator.reject(principal, structured.invocationId(), "CONTRADICTS_RECORD");
-            return new Refused("CONTRADICTS_RECORD", "the answer described severity as " + contradiction + ", which the facts do not say (PRD-AIC-035)", facts);
+            return Optional.of(new Refused("CONTRADICTS_RECORD", "the answer described severity as " + contradiction
+                    + ", which the facts do not say (PRD-AIC-035)", facts));
         }
-        return new Answer(answer, citations, facts, insufficient, structured.modelIdentity(), structured.promptVersion(), true);
+        return Optional.empty();
     }
 
     /** The grounding contract of `posture.answer`: these projections, within the caller's scope, and nothing else (PRD-AIC-031). */
@@ -201,12 +255,13 @@ public final class Assistant {
                 }
             }
             try (PreparedStatement s = c.prepareStatement(
-                    "SELECT count(*) FILTER (WHERE state IN ('SUBMITTED', 'TRIAGED', 'SCHEDULED', 'IN_PROGRESS', 'ACCEPTED')), count(*) FILTER (WHERE state = 'DRAFT') "
+                    "SELECT count(*) FILTER (WHERE state NOT IN (SELECT code FROM workflow_state GROUP BY code HAVING bool_and(category = 'TERMINAL'))), "
+                            + "count(*) FILTER (WHERE state IN (SELECT code FROM workflow_state GROUP BY code HAVING bool_and(category = 'TERMINAL'))) "
                             + "FROM assessment_request WHERE requested_org_node_id IN (SELECT descendant_id FROM org_closure WHERE ancestor_id = ANY (?))")) {
                 s.setArray(1, scope);
                 try (ResultSet r = s.executeQuery()) {
                     if (r.next()) {
-                        facts.add(new Fact("F" + n++, "assessment requests in flight: " + r.getLong(1) + "; drafts: " + r.getLong(2), Optional.of("/board")));
+                        facts.add(new Fact("F" + n++, "assessment requests still open: " + r.getLong(1) + "; closed or cancelled: " + r.getLong(2), Optional.of("/board")));
                     }
                 }
             }

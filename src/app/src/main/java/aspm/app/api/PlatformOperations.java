@@ -46,7 +46,13 @@ public final class PlatformOperations {
         // second, weaker enforcement point (CON-PLT-009).
         // Class G. A logo discloses nothing and must render on the sign-in page, before anybody is
         // authenticated — the same reasoning that already makes the stylesheet class G.
-        operations.add(new OperationRegistry.Operation("GET", "/brand/logo.svg",
+        operations.add(new OperationRegistry.Operation("GET", "/brand/icon.png",
+                AnnotationClass.G_UNAUTHENTICATED, Optional.empty(), Set.of(), Set.of()));
+        operations.add(new OperationRegistry.Operation("GET", "/brand/logo.png",
+                AnnotationClass.G_UNAUTHENTICATED, Optional.empty(), Set.of(), Set.of()));
+        operations.add(new OperationRegistry.Operation("GET", "/brand/logo-dark.png",
+                AnnotationClass.G_UNAUTHENTICATED, Optional.empty(), Set.of(), Set.of()));
+        operations.add(new OperationRegistry.Operation("GET", "/brand/copilot.png",
                 AnnotationClass.G_UNAUTHENTICATED, Optional.empty(), Set.of(), Set.of()));
         operations.add(new OperationRegistry.Operation("GET", "/brand/icon-180.png",
                 AnnotationClass.G_UNAUTHENTICATED, Optional.empty(), Set.of(), Set.of()));
@@ -628,6 +634,20 @@ public final class PlatformOperations {
         for (String route : java.util.List.of("/api/ui/ai/ask", "/api/ui/ai/draft")) {
             operations.add(new OperationRegistry.Operation("POST", route, AnnotationClass.B_SCOPED_WRITE,
                     Optional.of(aspm.app.ai.Assistant.USE), Set.of(), Set.of()));
+        }
+        // The copilot, under its OWN permission (V082). A tenant that wants drafting help for a role
+        // without a conversational window onto its whole scope cannot express that with one permission,
+        // and this is the single enforcement point where the distinction is made: the dispatcher answers
+        // 404 to a caller who does not hold it, so the surface cannot be probed either.
+        for (String route : java.util.List.of("/api/ui/ai/copilot", "/api/ui/ai/copilot/{id}/clear")) {
+            operations.add(new OperationRegistry.Operation("POST", route, AnnotationClass.B_SCOPED_WRITE,
+                    Optional.of(aspm.app.ai.Copilot.USE), Set.of(), Set.of()));
+        }
+        // The copilot's reads. Class A: a conversation is a record at the asker's own reach, and the
+        // query carries the per-principal predicate as well as the tenant's.
+        for (String route : java.util.List.of("/api/ui/ai/copilot", "/api/ui/ai/copilot/{id}")) {
+            operations.add(new OperationRegistry.Operation("GET", route, AnnotationClass.A_SCOPED_READ,
+                    Optional.of(aspm.app.ai.Copilot.USE), Set.of(), Set.of()));
         }
         for (String route : java.util.List.of("/api/ui/ai/usage", "/api/ui/ai/evaluations")) {
             operations.add(new OperationRegistry.Operation("GET", route, AnnotationClass.A_SCOPED_READ,

@@ -81,6 +81,15 @@ class AuditCoverageTest {
             "a download counter on the caller's own artifact. The generation was audited as "
                     + "report.generated for that recipient; a second event per download would record the "
                     + "same disclosure twice",
+            "Copilot#ask",
+            "writes the conversation transcript (ai_conversation, ai_conversation_message) — a question a "
+                    + "person asked and an answer they read once. Nothing in the system of record changes: the "
+                    + "copilot has no write path into findings, requests or assets, and the model call it makes "
+                    + "is already one invocation row (PRD-AIC-043) carrying who asked, what was retrieved and what "
+                    + "left the boundary. An event per chat turn would bury the decisions DOC-14 keeps the chain for",
+            "Copilot#clear",
+            "drops a conversation from one person's own list by setting lifecycle_state; the rows are retained "
+                    + "(V081) and nothing anybody else can see changes",
             "ModelNarrator#call",
             "the invocation record (PRD-AIC-043): one row per model call, cached hit or budget refusal, "
                     + "written on its own connection. The AI trail is the ai.invoked event the capability run "

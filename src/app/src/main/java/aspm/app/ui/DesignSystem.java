@@ -780,8 +780,28 @@ public final class DesignSystem {
            first. Sized in the markup as well as here, so it reserves its space before the image
            arrives and the wordmark does not jump. */
         .auth-brand .auth-logo {
-          inline-size: 28px; block-size: 28px; flex: none;
-          filter: drop-shadow(0 4px 10px color-mix(in srgb, var(--fg-default) 25%, transparent));
+          inline-size: 168px; block-size: auto; flex: none;
+          filter: drop-shadow(0 4px 10px color-mix(in srgb, var(--fg-default) 18%, transparent));
+        }
+        /* Two files, one shown. The shield keeps its colours in both and only the word changes — navy
+           on a light ground, near-white on a dark one — so this swaps the file rather than filtering
+           the image, which would invert the shield along with the word.
+
+           Three cases, because the page has three: an explicit choice, an explicit light choice, and
+           no choice at all, where the operating system decides. High contrast is black-on-white text
+           on black, so it takes the dark mark. */
+        .auth-logo-dark { display: none; }
+        :root[data-theme="dark"] .auth-logo-light,
+        :root[data-theme="hc"] .auth-logo-light { display: none; }
+        :root[data-theme="dark"] .auth-logo-dark,
+        :root[data-theme="hc"] .auth-logo-dark { display: inline; }
+        @media (prefers-color-scheme: dark) {
+          :root:not([data-theme]) .auth-logo-light { display: none; }
+          :root:not([data-theme]) .auth-logo-dark { display: inline; }
+        }
+        .visually-hidden {
+          position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden;
+          clip-path: inset(50%); white-space: nowrap;
         }
 
         .auth-title { font-size: var(--fs-24); letter-spacing: -0.02em; }

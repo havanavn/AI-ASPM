@@ -284,8 +284,14 @@ public final class AspmApplication {
         // The interface. ADR-058.
         // The product mark, beside the stylesheet and for the same reason: both are class G, both must
         // render on the sign-in page, and both are one file rather than a copy per interface.
-        routes.add(new Dispatcher.Route("GET", new PathTemplate("/brand/logo.svg"),
-                aspm.app.ui.BrandAssets::logo));
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/brand/icon.png"),
+                aspm.app.ui.BrandAssets::icon));
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/brand/logo.png"),
+                aspm.app.ui.BrandAssets::wordmark));
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/brand/logo-dark.png"),
+                aspm.app.ui.BrandAssets::wordmarkDark));
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/brand/copilot.png"),
+                aspm.app.ui.BrandAssets::copilot));
         routes.add(new Dispatcher.Route("GET", new PathTemplate("/brand/icon-180.png"),
                 aspm.app.ui.BrandAssets::touchIcon));
         routes.add(new Dispatcher.Route("GET", new PathTemplate("/style.css"),
@@ -607,6 +613,11 @@ public final class AspmApplication {
         var aiApi = new aspm.app.ui.AiApi(dataSource);
         routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/ai/ask"), aiApi::ask));
         routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/ai/draft"), aiApi::draft));
+        // The copilot (ADR-077). Read its own conversations, ask, replay one, drop one.
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/ai/copilot"), aiApi::copilotOpen));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/ai/copilot"), aiApi::copilotAsk));
+        routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/ai/copilot/{id}"), aiApi::copilotConversation));
+        routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/ai/copilot/{id}/clear"), aiApi::copilotClear));
         routes.add(new Dispatcher.Route("GET", new PathTemplate("/api/ui/ai/usage"), aiApi::usage));
         routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/ai/budget"), aiApi::budget));
         routes.add(new Dispatcher.Route("POST", new PathTemplate("/api/ui/ai/evaluate"), aiApi::evaluate));

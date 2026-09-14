@@ -286,6 +286,48 @@ Tenants declare, per category, whether it may enter model context. Enforcement i
 | `PRD-AIC-045` | Where a capability's suggestion diverges from a deterministic computation, the divergence MUST be stated with its reason rather than presented as the computation's result. | Silent divergence makes the deterministic result appear to be something it is not, which undermines the reproducibility the deterministic path exists to provide. | M | AT |
 | `PRD-AIC-046` | Executive narrative MUST lead with coverage limitation where confidence is `INSUFFICIENT`, and MUST NOT present a posture figure as the primary statement. | Its audience is least able to detect an error and most likely to act on it. A confident narrative over incomplete data is PP-1 violated at the point of maximum consequence. | M | AT, MT |
 | `PRD-AIC-057` | A question a person asks about the posture in natural language MUST be answered only from projections the platform composed within that person's scope, with every claim citing the fact it rests on; an answer with an unresolvable citation, an uncited claim, or a figure absent from the facts MUST be rejected rather than shown, and where the facts cannot answer the question the capability MUST say so. | The largest user population reads dashboards it did not design and asks the security team what they mean; a grounded answer with citations moves that question off the team without moving the authority. The three rejection conditions are the three ways a fluent answer becomes a wrong one, and the reader of a fluent answer is the least able to notice. Stating insufficiency is PP-1 applied to a question: a model that answers over missing data produces the confident wrong statement §8.1 exists to prevent. | M | AT, MT |
+| `PRD-AIC-058` | Where question answering is offered as a conversation, each turn MUST retrieve only the projections that turn needs, within the asker's scope; the platform — never the model — MUST resolve any record the question names, and only within that scope; a projection the asker's permissions do not reach MUST be omitted and named as omitted rather than answered around; and the transcript MUST be held by the platform rather than supplied by the client. | A conversation is not `PRD-AIC-057` repeated. Four properties change and each fails in a different direction. Retrieving everything for every turn sends a tenant's whole posture to a provider because somebody typed a sentence, which is the data-category failure §7 exists to prevent, and buries the two figures that answered the question. Letting the model name a record makes the prompt an authorization decision point, which product principle 4 forbids — a model that can name a row can name one the asker may not see, and the platform cannot tell a resolved name from an invented one. Answering around an omitted projection is the most dangerous failure available to a fluent surface: asked about the whole estate by a reader who cannot see half of it, a silent narrowing reads as a complete answer, which is `PRD-AIC-048` and PP-1 in the same sentence. And a transcript that round-trips through the client lets a caller forge what the assistant previously said, placing attacker-chosen instruction text inside the material the model is told to trust — the fence of `PRD-AIC-037` guards the content channel and would not see it arrive. | M | AT, MT, PT |
+
+---
+
+### 8.7 Copilot conversation — `PRD-AIC-058`
+
+**Source.** The projections `PRD-AIC-057` composes, retrieved per turn rather than as one fixed set, plus the assessment plan, the
+assessor teams' load, the accepted risks and their expiry, the component inventory's coverage, the tenant's role
+catalogue and grants, **and the product's own documentation** — the user guide and the integration guide, per locale,
+retrieved by section, together with the operation registry the dispatcher enforces. Each body of facts declares the
+permission it requires; the two documentation bodies require none, because a product that explains itself only to the
+people who already hold authority explains itself to the wrong half of its users (PP-7).
+
+**Why documentation is a source and not a separate feature.** "How do I call the API" and "how do I give the developers
+access" are questions with an answer and no row behind them. A conversational surface that can only reach the database
+answers them by declining or, worse, by improvising a screen that does not exist. The documents are the platform's own
+words about its own screens, so they are cited like any other fact and the reader can open the section. The operation
+table is read from the registry rather than from prose, so the copilot cannot name an endpoint that does not exist or
+state a permission that differs from the one enforced.
+
+**What the model does.** Two calls per turn at most. The first chooses which bodies of facts the question needs and
+reports any record names the question mentions — a routing decision, not an answer. The second writes the prose around
+the figures the platform retrieved, in the language the question was asked in.
+
+**What the model never does.** Resolve a record. A name the first call reports is a *string to search for*; the
+platform searches its own inventory under the asker's scope predicate and either resolves it or does not. Nothing the
+model returns is treated as an identifier.
+
+**Citation granularity.** Per claim, as `PRD-AIC-057`.
+
+**Prohibitions.** No figure that is not in the retrieved facts (ADR-038). No projection the asker's permissions do not
+reach — and where the question needed one, the answer names it as withheld and does not substitute a narrower figure.
+No write path: the copilot reads, and the actions it suggests are taken by the person in the ordinary interface.
+
+**Completeness.** An answer that stops mid-clause is rejected on the same terms as one that cites a fact it was not
+given. Found in use: a fragment cited correctly, invented nothing and contradicted nothing, and stopped before the name
+the reader had asked for — every grounding check asks whether the claims are supported and none asked whether the
+statement finished.
+
+**Non-AI fallback.** Keyword routing over both target locales, and an answer composed from the retrieved figures. It is
+plainer, it is not in the asker's language unless that language is the platform's default, and it is labelled as
+composed rather than generated. What is lost is the phrasing, not the figures.
 
 ---
 
@@ -405,6 +447,9 @@ The domain's distinctive risk is indirect prompt injection reachable without pla
 
 | Version | Date | Author | Change | Reviewer |
 |---|---|---|---|---|
+| 1.4.0 | 2026-09-13 | Chief Software Architect; Principal Security Architect | Recorded two defects found in use and the controls they produced, under `PRD-AIC-058` rather than as new requirements. A question about which application to assess next had no body of facts that answered it, so it was answered from adjacent ones — the constraint "retrieve what the turn needs" is satisfied only if a pack exists for what the turn needs, which is now stated in §8.7. And a generated answer that stopped mid-sentence passed every check in §6, because all four asked whether the claims were grounded and none asked whether the statement finished; the rejection conditions of `PRD-AIC-057` are therefore read as including an incomplete statement, and the implementation rejects one. | Pending |
+| 1.3.0 | 2026-09-13 | Chief Software Architect; Principal Security Architect | Extended §8.7 with the two sources `PRD-AIC-058` implied and did not name: the product's own documentation, and the operation registry. Reported from use — the copilot could report how many findings were open and could not say how to call the API or how to grant a role, because every body of facts it had was a database query and neither question has a row behind it. The documentation bodies require no permission, which is stated as a consequence of PP-7 rather than left as an omission; the operation table is generated from the registry the dispatcher enforces, so it cannot document an endpoint that does not exist. No new requirement: the constraint `PRD-AIC-058` states — retrieve what the turn needs, name what is withheld — is the one these sources are retrieved under. | Pending |
+| 1.2.0 | 2026-09-13 | Chief Software Architect; Principal Security Architect | Added `PRD-AIC-058` and §8.8: question answering offered as a conversation. Written as four constraints rather than as a feature, because each guards a failure the single-turn surface does not have — per-turn retrieval against whole-posture egress, platform-side record resolution against the model becoming an authorization decision point, named omission against a silently narrowed answer, and a server-held transcript against forged assistant turns re-entering the prompt as instructions. The injection corpus gained the conversation's two new grounding fields, the question and the stored history (`PRD-AIC-051`, `TST-AIC-002`). Recorded with ADR-077. | Pending |
 | 1.1.0 | 2026-09-13 | Chief Software Architect; Principal Security Architect | Added `PRD-AIC-057`, grounded question answering over the posture, as the seventh capability. It is written as an extension of §8, not a relaxation of §5: the answer is composed from the same projections a dashboard reads, within the same scope (`PRD-AIC-030`), and the three rejection conditions restate `PRD-AIC-033` and `PRD-AIC-034` for a surface where the reader chose the question. Recorded here because ADR-075 delivers the capabilities ADR-044 deferred, and the one capability the catalogue of §8 did not name needed a requirement before it could be built against one. The grounding contract gained two fields — the caller's question and the caller's notes — and the injection corpus was extended for both (`PRD-AIC-051`). | Pending |
 | 1.0.0 | 2026-08-04 | Chief Software Architect; Principal Security Architect; Staff Product Manager | Initial content-complete version. States ADR-005 as two architectural properties — no write grant, no dependency edge — rather than as policy. Specifies provider abstraction with residency and training-consent constraints; the suggestion ledger with promotion through the ordinary operation; grounding contracts with numeric substitution rather than validation so that incorrect numbers are unrepresentable; eight-layer injection defence with containment identified as load-bearing and the residual honestly assessed; category-based data governance enforced at context assembly with four categories never permitted; six capability specifications with sources, citation granularity, prohibitions, and fallbacks; non-AI fallbacks for every capability with what is lost stated; an evaluation harness with five absolute thresholds and three rate thresholds gating release; and cost control prohibiting automatic invocation on view. Thirty-six requirements. | Pending |
 

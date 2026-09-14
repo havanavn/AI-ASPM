@@ -374,7 +374,10 @@ class ApplicationTierTest {
             // 264: the AI surfaces of ADR-075 (V078) — two class B writes for ask and draft under
             // aic.assist.use; two class A reads and three class E writes for usage, budget, evaluation and
             // the provider probe under cfg.ai.manage.
-            assertEquals(264, registry.all().size(), "registered: " + registry.all().size());
+            // 270: the brand mark split into the square icon and the wordmark (both class G), replacing
+            // the single hand-drawn SVG — one route removed, two added; then the copilot of ADR-077 —
+            // its launcher icon (class G) and four operations under aic.assist.use.
+            assertEquals(271, registry.all().size(), "registered: " + registry.all().size());
         }
 
         @Test

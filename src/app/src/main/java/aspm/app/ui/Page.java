@@ -279,8 +279,8 @@ public final class Page {
                 .append(Html.text(messages.get("app.name"))).append("</title>\n")
                 // The same URL the single-page interface uses. One file behind it, so the two
                 // interfaces cannot come to show different logos after somebody updates one.
-                .append("<link rel=\"icon\" type=\"image/svg+xml\" href=\"/brand/logo.svg\">\n")
-                .append("<meta name=\"theme-color\" content=\"#C8102E\">\n")
+                .append("<link rel=\"icon\" type=\"image/png\" href=\"/brand/icon.png\">\n")
+                .append("<meta name=\"theme-color\" content=\"#002968\">\n")
                 .append("<link rel=\"stylesheet\" href=\"/style.css\">\n")
                 .append("</head>\n<body>\n");
 

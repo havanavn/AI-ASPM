@@ -101,6 +101,7 @@ ADR-049 through ADR-056 are the eight technology selections DOC-02 §16 deferred
 | ADR-074 | Reports are rendered per recipient by the worker; compositions are product-fixed and carry their basis | Accepted |
 | ADR-075 | The deferred AI capabilities are delivered behind the built rails: provider families as adapters, the DOC-10 §8 capabilities on the ledger, a grounded question surface, budget and invocation records, and the harness | Accepted; supersedes ADR-044 in part |
 | ADR-076 | A planned window names who is expected to do it, as a soft reference; the plan is read per unit, team, person and month | Accepted |
+| ADR-077 | The copilot retrieves per question, resolves records itself, names what it may not read, and owns the transcript | Accepted |
 
 ---
 
@@ -2195,10 +2196,132 @@ The constraint is the one ADR-005 and DOC-10 §2 set and that nothing here relax
 
 **References.** `PRD-ASM-015`, `PRD-ASM-018`, `PRD-ASM-024`, `PRD-ASM-026`, `SEC-AUZ-016`, ADR-027, ADR-030, ADR-065, V080.
 
+## ADR-077 — The copilot retrieves per question, resolves records itself, names what it may not read, and owns the transcript
+
+**Status.** Accepted · **Date.** 2026-09-13 · **Deciders.** Chief Software Architect, Principal Security Architect
+
+**Context.** ADR-075 delivered `posture.answer`: one question, one fixed set of projections, an answer with citations. Reported from use on 2026-09-13, the ask was for a copilot on every screen answering *"tất cả những gì user có thể hỏi"* — everything a user might ask — with examples spanning four different retrievals: does the company's estate carry risk, does *this application* carry risk, has *this application* been assessed, summarise the open critical and high findings, which requests are late or at risk of being late, what is the workload per person and per team.
+
+The single-shot surface answers the first of those and fails the rest in a way that is worse than refusing. Asked "has this application been assessed", it composes estate-wide counts that never mention the application and writes a fluent paragraph around them. The reader cannot tell that the question was not answered, because the answer is about the same subject matter and cites facts that are true.
+
+Four things have to change at once, and each of them is a place where a conversational surface can fail in a way `PRD-AIC-057` cannot.
+
+**Decision.**
+
+1. **Retrieval per question, from eleven declared packs.** Posture, applications, coverage, commitments, requests, workload, organizations, exceptions, top findings, plan, component inventory. A question is routed to the packs that can answer it; only those are queried and only those are sent. The alternative — gather everything, every turn — sends a tenant's whole posture to a provider because somebody typed a sentence, and buries the two figures that answered the question among forty that did not.
+
+2. **The platform resolves records; the model never does.** The router may report *names* the question mentions. Those are strings to search for. The platform resolves them against its own inventory under the caller's scope predicate, or fails to. Treating a model's output as an identifier would make the prompt an authorization decision point — a model that can name a row can name one the caller may not see, and nothing downstream can tell a resolved identifier from an invented one.
+
+3. **A pack the caller cannot read is named, not worked around.** Each pack declares its permission. Per-person load is the sharp case: DOC-07 §5.2 puts it behind `cap.member.read.all` and DOC-12 §5.1 keeps it out of executive presentation altogether. Where a question needed a pack the caller cannot read, the answer says which and does not substitute a narrower figure — `PRD-AIC-048`, and PP-1: a silently narrowed answer to a question about the whole estate reads as a complete one.
+
+4. **The transcript is the platform's (V081).** Conversations and turns are rows, per principal. Sending history back with each question would make prior *assistant* turns client-supplied text, and a forged assistant turn is attacker-chosen instruction text arriving inside the material the model is told to trust. The fence of `PRD-AIC-037` guards the content channel and would not see it arrive.
+
+The grounding controls are unchanged and are the **same code**: `Assistant.rejection` now serves both surfaces. An unresolved citation, an uncited claim, a figure not in the facts, a severity the record does not carry — any of them rejects the whole answer, and the platform answers from the figures instead.
+
+**Options considered.**
+
+| Option | Why not |
+|---|---|
+| Extend `posture.answer` with more facts | The failure is not too few facts, it is the wrong ones. A fixed set large enough for every question is one that sends the estate on every turn and answers each question with the average of all of them. |
+| Let the model call tools, choosing its own queries | The attractive option, and the one rejected hardest. A tool call carrying an identifier the model chose is the authorization decision point of point 2, moved one layer down and made harder to see. Routing returns pack *codes* from a fixed list and names to *search for*; both are validated against something the platform owns. |
+| Give the copilot a write path — raise a request, assign a finding | ADR-005: AI writes to the suggestion ledger and nowhere else. A conversational write is the ledger's promotion step performed by a reader who has not seen the record. The copilot links to the screen where the action is taken. |
+| Keep the transcript in the browser | Less work, and it hands the prompt's trusted half to the client. Discussed above. |
+| Answer only in English | The first target locale is Vietnamese (`NFR-INT-003`) and the questions arrive in it. The model answers in the language of the question; the keyword router reads both, with and without tone marks, because that is how the language is typed. |
+
+**Consequences.**
+
+- **Accepted: two model calls per turn** — one to route, one to answer — against one for `posture.answer`. The routing call is small (300 tokens) and the saving on the answer call is larger, because the facts it is given are the ones the question needed.
+- **Accepted: routing can be wrong.** A question routed to the wrong pack is answered from figures that do not address it, and the model is told to state insufficiency rather than improvise. The keyword rules are unioned with the model's choice rather than replacing it, so the two disagree in the direction of one query too many.
+- **Accepted: the rules fallback answers in the platform's default language, not the asker's.** With no provider, an exhausted budget or a rate-limiting gateway, the answer is composed from the figures and is correct and plainer. What is lost is the phrasing and the locale, not the numbers, and the answer says which it is.
+- **Cost paid: the copilot is on every page, so it is the most reachable AI surface in the product.** It is behind `aic.assist.use`, the capability switch, the daily token budget and the per-principal hourly limit, and every turn writes an invocation record with its data category — the same governance as every other capability, applied to the surface most likely to be used.
+- **Accepted: a conversation holds figures at the asker's reach, so it is theirs alone.** Not shareable, and every query carries the per-principal predicate as well as the tenant's.
+- **Finding recorded during the work.** Writing the corpus entries for the two new grounding fields (`TST-AIC-002`) produced three injection families the detector missed: an instruction aimed at the *facts* rather than at the system message ("ignore the FACTS"), an exfiltration attempt spelled "system instructions" rather than "system prompt", and "omit anything about X" where only "do not mention" was covered. The patterns were added rather than the payloads softened. This is the third time the corpus has found something review did not.
+
+**Amended 2026-09-13, same day.** Three more packs, after the first use found the gap: the user guide, the integration
+guide plus the operation registry, and the tenant's roles and grants. The first two require no permission and carry no
+tenant data — the guides are navigation entries with none, and PP-7 puts the people who most need to be told how the
+product works at the narrow end of the permission range. Retrieval over the documents is term overlap across both
+locales rather than embeddings: four documents and about three hundred sections do not justify a second store to keep in
+step with the prose, a model call on the retrieval path, and a similarity score nobody can explain. The bridge from a
+concept to an endpoint is the prose itself — "Submitting scan results" shares no word with `/api/v1/finding-imports`,
+and the section that answers the question names the path, so the paths a matched section mentions are what the registry
+is then asked about. A synonym table would have been a third thing to keep in step with two.
+
+**Amended again 2026-09-13, from a live answer.** Asked in Vietnamese which application to assess this month, the
+copilot replied, in full, *"Dựa trên kế hoạch hiện tại, bạn nên đánh giá bảo mật ứng dụng"* — "based on the current plan
+you should assess application" — and stopped before the name. Two defects, and the second is the one worth recording.
+
+*The retrieval was wrong for the question.* The packs offered the plan (what somebody intends to do) and the
+applications carrying the most open findings (what has already been looked at). Neither answers "what should I look at
+next": the applications most owed assessment are the ones the platform knows least about, and they carry few findings
+precisely because nobody has looked. A twelfth pack now names them, ordered lexicographically over recorded facts —
+never assessed before overdue before due soon; within each, unplanned before already planned, internet-facing before
+internal, higher criticality tier, more open findings at the two most severe levels, longest owed. **Deliberately not a
+weighted score**: DOC-28 owns the risk model, three of its six factors have no input in this deployment, and a second
+weighted number here would look like that one, could not be reconciled with it, and would be quoted as though it were.
+An ordering can be read off the columns and disputed one clause at a time. Today's date and each application's due date
+are facts, so "this month" is a comparison the answer makes and cites rather than a period the model guesses at.
+
+*A fragment passed every control.* It cited a fact it had been given, invented no figure and contradicted no severity,
+so `Assistant.rejection` let it through — what it did not do was finish the sentence, and the word it stopped before was
+the one the reader had asked for. A fifth control rejects an answer whose last character is a letter or a digit, a
+finished statement ending on terminal punctuation, a closing bracket or a closing quote. The false-positive cost is the
+plainer answer composed from the figures, which is correct; the false-negative cost is a confident fragment nobody can
+tell is a fragment. The prose allowance was raised from 1400 to 2000 tokens at the same time, because a reasoning model
+spends most of its budget before it writes.
+
+**Measured 2026-09-14, twenty questions a head of security asks.** Run against the live estate through the engine. Four
+findings, each fixed, and the measurement is the reason to state them rather than the fix.
+
+1. **Two of twenty were rejected by their own grounding checks, and both were the questions that retrieved the most** —
+   seven packs and fifty-eight facts for "where should I invest next quarter", eight for "what do I report to the board".
+   A model handed everything answers without citing anything. Retrieval is now capped at five packs per turn, keyword
+   matches first because a keyword is a word the person actually typed.
+2. **Three questions were refused over data the platform holds.** "Is it getting better", "how long does remediation
+   take", "up or down against last month" were all answered honestly with *insufficient* while the backlog ninety days
+   ago was derivable from two dates every finding carries and the time to close is their difference. A refusal over data
+   the platform holds is the same failure as an invented answer with better manners. A trend pack now carries direction,
+   month-by-month opened and closed, and mean, median and ninetieth-percentile days to remediate — absent rather than
+   zero where nothing has closed.
+3. **"Is the security team overloaded?" answered "there is spare capacity".** Every assessor showed zero findings
+   assigned — because 296 of 304 open findings had no assignee at all. Zero assigned is unmeasured load, not light load,
+   and the pack now says so above the figures rather than leaving the reader to infer it. PP-1, in the one place where
+   getting it wrong sends somebody to cut a team.
+4. **Latency was 7.5 seconds mean, 21.8 worst, before the model was called.** The application pack ran its severity
+   breakdown once per application, and carried a request-scope clause that duplicated a branch of the view it was
+   already reading. One grouped query: 2.1 seconds mean.
+
+A fifth was left open in that report and closed after it: the component pack reported coverage and nothing else, so
+"do we depend on a vulnerable library" was answered with how many assets had submitted a bill of materials. It now
+reports the components themselves — **grouped by component rather than by the link rows**, because the link table
+carries one row per asset per advisory and the measured estate held two hundred and thirty-one of them over nineteen
+components, most being the same Log4shell entry repeated. Each component carries its worst advisory, how many assets
+carry it, whether a fixed version is published, and whether it is a direct dependency somebody chose or a transitive one
+that arrived with something else. **Fix available or not is reported as a split rather than a total**: one is an upgrade
+somebody schedules, the other is a decision, and a single number hides which. A component the question names is resolved
+in SQL like an application, so "are we exposed to log4j" answers with the assets that carry it. The coverage caveat is
+attached to the counts rather than printed once: every component figure is over the covered part of the estate, and an
+asset with no bill of materials has no matched vulnerabilities and is not therefore clean.
+
+Two smaller corrections came out of the same run. The completeness control of the previous amendment rejected an
+809-token answer that merely ended on an organization's name, so it now uses the provider's own `finish_reason` — which
+is authoritative — and applies the text heuristic only below eighty characters, where a missing full stop cannot be a
+style. And "quản trị" in *hội đồng quản trị*, the board, matched the access pack's keyword for administration, so a
+question about board reporting retrieved the role catalogue.
+
+**Revisit if.** A tenant needs the copilot to act rather than answer, at which point ADR-005 is what has to change first and the promotion interface is where the argument belongs. Or if routing accuracy measured by the harness (`PRD-AIC-049`) falls below what the rules alone achieve, which would mean the model is choosing worse than the keywords and should be removed from the routing step.
+
+**References.** `PRD-AIC-030`, `PRD-AIC-033`, `PRD-AIC-034`, `PRD-AIC-036`, `PRD-AIC-037`, `PRD-AIC-043`, `PRD-AIC-048`, `PRD-AIC-051`, `PRD-AIC-057`, `PRD-AIC-058`, `PRD-CAP-013`, `PRD-CAP-014`, `SEC-AUZ-016`, `SEC-AUZ-026`, `TST-AIC-002`, ADR-005, ADR-027, ADR-030, ADR-038, ADR-047, ADR-075, V081.
+
 ## Change History
 
 | Version | Date | Author | Change | Reviewer |
 |---|---|---|---|---|
+| 1.14.0 | 2026-09-14 | Chief Software Architect, Principal Security Architect | Closed the fifth finding of the twenty-question measurement: the component pack reported coverage and not components, so a question about vulnerable dependencies was answered with how many bills of materials had been submitted. It now names the components, grouped rather than per link row, each with its worst advisory, the assets carrying it, whether a fix is published and whether it is direct or transitive — with the fix split stated separately because an upgrade and a decision are different work. 77 expanded records. | Pending |
+| 1.13.0 | 2026-09-14 | Chief Software Architect, Principal Security Architect | Recorded a twenty-question measurement of the copilot against the live estate and the four defects it found: over-retrieval producing uncited answers, three executive questions refused over data the platform holds, unmeasured workload reading as spare capacity, and seven-second retrieval from a per-application query loop. Each fix is stated with the measurement that produced it, because the measurement is what a reader needs to judge whether the fix was the right one. 77 expanded records. | Pending |
+| 1.12.0 | 2026-09-13 | Chief Software Architect, Principal Security Architect | Amended ADR-077 from a live answer that stopped mid-sentence. Two defects recorded: the retrieval had no body of facts for "what should I assess next", so the question was answered from the plan and from the applications that had already been looked at; and a fragment passed every grounding control because none of them asked whether the sentence finished. The twelfth pack orders what is owed lexicographically over recorded facts and is explicitly not a second weighted score, with the reason DOC-28 gives for why a second one would be quoted as though it were the first. | Pending |
+| 1.11.0 | 2026-09-13 | Chief Software Architect, Principal Security Architect | Amended ADR-077 with the three packs the first use showed were missing — the user guide, the integration guide with the operation registry, and the tenant's roles and grants — and with the reasons for the two choices inside them: term overlap rather than embeddings at this corpus size, and the prose as the bridge from a concept to an endpoint rather than a synonym table. 77 expanded records. | Pending |
+| 1.10.0 | 2026-09-13 | Chief Software Architect, Principal Security Architect | Added ADR-077, the copilot: per-question retrieval from eleven permission-declaring packs, record resolution performed by the platform and never by the model, an unreadable pack named rather than answered around, and a server-held transcript. Records the option rejected hardest — letting the model call tools with identifiers it chose — and the reason, which is that it moves the authorization decision point into the prompt where nothing downstream can see it. Also records a finding: writing the injection corpus for the two new grounding fields produced three attack families the detector missed, and the patterns were widened rather than the payloads softened. 77 expanded records. | Pending |
 | 1.9.0 | 2026-09-13 | Chief Software Architect, Principal Security Architect | Added ADR-076, giving the planned window an optional expected team and assessor as soft references and the plan a per-unit, per-team, per-person, per-month reading; ADR-065 marked superseded in part for its "no assignee" consequence, with the record retained. 76 expanded records. | Pending |
 | 1.8.0 | 2026-09-13 | Chief Software Architect, Principal Security Architect | Added ADR-075, delivering the AI capabilities ADR-044 deferred and marking ADR-044 superseded in part — the deferral only; the architecture-first decision and all its properties stand, and the record says so on ADR-044 itself rather than leaving a reader to infer which half changed. The record is explicit about what it does not relax (ADR-005, no write grant, no generated figure, labelling) and about the two costs a tenant will meet first: a self-hosted endpoint is vouched for by the operator, not chosen by the tenant, and RECORD capabilities send finding text to the provider the tenant named. Residual risk RISK-PLT-001 is restated as standing. 70 expanded records — counted from the headings. | Pending |
 | 1.7.0 | 2026-09-13 | Chief Software Architect, Principal Security Architect | Added ADR-067 through ADR-074, each recording a capability the corpus specified and the running platform lacked, built as options rather than as a vendor: the secrets contract with a platform-sealed default and four enterprise stores as adapters, which answers `OQ-026` by the option set (ADR-067); OIDC federation with presets as data and ADR-059 retained for local and break-glass access (ADR-068); notification channels as shipped adapters over an outbox, realising ADR-054 (ADR-069); outbound connectors behind one contract with the reference one-way and divergence a decision for a person (ADR-070); the same artifact deployed as the DOC-15 runtime units behind a mesh, with the chart generated from the deployment model (ADR-071); the registered exemption for unforced tables (ADR-072); tenant context for class G operations with a session (ADR-073); and reports rendered per recipient with product-fixed compositions that carry their basis (ADR-074). Two records state a defect they close rather than only a decision: ADR-072 a conformance check failing on correct tables, ADR-073 a 500 answered to a person changing an expired credential. What is deferred is stated in each record — SCIM, SAML, report templates, the separate match and projection units — with the reason. **The index was also completed:** it stopped at ADR-059 while records 060–066 existed with change-history rows, so seven rows were added for them; nothing in those records changed. 69 expanded records — counted from the headings. | Pending |

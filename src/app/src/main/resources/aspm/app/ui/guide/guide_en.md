@@ -383,6 +383,29 @@ same computation twice you get the same answer twice.
 you. Asking is gated on the permission to act on the answer, not on the administrator permission that
 enabled the capability.
 
+### The copilot
+
+The mark at the bottom right of every screen opens a conversation about the posture you can reach. It
+retrieves the figures your question needs, cites each claim to the figure it rests on, and says which
+part of a question it could not look at rather than answering a narrower question as though it were
+the one you asked.
+
+It reads two kinds of source. Your data — findings, applications, commitments, requests, the plan,
+the roster where you may read it — always within your own scope and never a row you could not open
+yourself. And this guide and the integration guide, which is how it answers "how do I do X" and "how
+do I call the API". The endpoints it names are read from the live operation table, so it cannot
+invent one.
+
+It has no write path. Where an answer suggests an action, the link goes to the screen where you take
+it.
+
+**Who may use it is a separate decision.** The copilot is gated on its own permission,
+`aic.copilot.use`, apart from the permission that gates the draft buttons and the single-question
+box. The two are different reaches: a draft button helps with the record in front of you, the copilot
+reaches across everything you can see. A tenant can therefore give engineering roles drafting help
+without giving them a conversational window onto the estate — or give one person the copilot and
+nobody else on their team. See §14 for how.
+
 ## 14. Access and roles
 
 Two screens, deliberately separate, because "who may use the platform" and "what a role means" are
@@ -437,6 +460,25 @@ Points worth knowing before you compose one:
 breached-credential checking is on, session lifetimes, and whether the second factor is required for
 everybody. It also reports the size of the breach corpus loaded, so a thin corpus is visible rather
 than looking like a working check.
+
+### Giving one person one capability
+
+A role may hold a single permission. That is the mechanism for "this person, for this quarter, over
+this unit" — and it is the answer whenever a capability suits one member of a team and not the team.
+
+Create a role with one permission in it, name it for what it grants rather than for who holds it, and
+grant it to the person over the scope you mean. A grant may carry an expiry, so a temporary
+arrangement expires without anybody having to remember it.
+
+Worked example, the AI copilot for one engineer:
+
+1. **Roles** → new role → name it `AI copilot` → add `aic.copilot.use` → save.
+2. **Access** → open the person → grant → role `AI copilot`, scope **Subtree** on their unit, expiry
+   if the arrangement is temporary.
+
+To take the copilot away from a whole role instead, open that role and remove `aic.copilot.use` from
+it. Their drafting buttons and the single-question box keep working: those are gated on
+`aic.assist.use`, which is a different permission.
 
 ## 15. When something is refused
 
